@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="brand-section">
+      <span class="logo-badge">NAVI-CV</span>
+      <h1 class="app-title">
+        NaviVision Studio <span class="subtitle">OpenDevelop v1.1</span>
+      </h1>
+    </div>
+
+    <!-- 模式切换: 算子模式 vs 代码模式 -->
+    <div class="mode-switch-group">
+      <button class="mode-btn active" id="btnModePipeline">
+        <span>🧩</span> 可视化流水线
+      </button>
+      <button class="mode-btn" id="btnModeCode">
+        <span>💻</span> Python 脚本模式
+      </button>
+    </div>
+
+    <div class="header-center">
+      <div class="sample-selector">
+        <span>🏭 案例:</span>
+        <select id="sampleSelect">
+          <option value="pills">载入中...</option>
+        </select>
+      </div>
+      <input type="file" id="uploadInput" accept="image/*" style="display:none;">
+      <button class="btn btn-secondary" id="btnUpload" title="载入本地工业相机照片或测试图">
+        📁 打开图片
+      </button>
+      <button class="btn btn-secondary" id="btnSaveProject" title="导出保存为 .nvproj 视觉工程文件">
+        💾 保存工程
+      </button>
+      <button class="btn btn-secondary" id="btnOpenProject" title="打开并恢复 .nvproj 视觉工程文件">
+        📂 打开工程
+      </button>
+      <input type="file" id="projectFileInput" accept=".nvproj,.json" style="display:none;">
+      <input type="file" id="batchInput" accept="image/*" multiple style="display:none;">
+      <button class="btn btn-primary" id="btnBatchInspect" title="按当前流水线批量检测，并导出判定报告">
+        🏭 批量检测
+      </button>
+    </div>
+
+    <div class="header-actions">
+      <div class="badge-metric" title="计算引擎响应延迟">
+        <span>⚡ 延迟:</span>
+        <span id="hudLatency">0ms</span>
+      </div>
+      <button class="btn btn-secondary" id="btnOpenApiHub" title="查看对外开放的工业 REST API 与客户端调用代码">
+        🌐 开放 API
+      </button>
+      <button class="btn btn-accent" id="btnExportCode" title="生成并导出工业级 Python / OpenCV 脚本">
+        🚀 导出 Python 代码
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Studio Workspace (3-Column Layout) -->
+  <main class="studio-container">
+
+    <!-- 1A. Left Column: Operator Pipeline (HDevelop Program Window) -->
+    <aside class="panel-pipeline" id="panelPipeline">
+      <div class="panel-header">
+        <h3>📋 算子流水线 <span class="step-count" id="stepCountBadge">0 算子</span></h3>
+        <div style="position:relative;">
+          <button class="btn btn-primary" id="btnAddOp" style="padding:4px 10px;font-size:12px;">
+            + 添加算子
+          </button>
+          <!-- 下拉算子菜单 -->
+          <div id="addOpMenu" style="display:none;position:absolute;top:32px;right:0;width:180px;background:var(--bg-panel-elevated);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:var(--shadow-dropdown);z-index:100;padding:6px 0;">
+            <button class="dropdown-item" data-op="threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🎚️</span> threshold (双阈值)
+            </button>
+            <button class="dropdown-item" data-op="auto_threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🪄</span> auto_threshold (Otsu)
+            </button>
+            <button class="dropdown-item" data-op="connection" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🧩</span> connection (打散连通)
+            </button>
+            <button class="dropdown-item" data-op="select_shape" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🎯</span> select_shape (特征筛选)
+            </button>
+            <button class="dropdown-item" data-op="morphology" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🔬</span> morphology (形态学)
+            </button>
+            <button class="dropdown-item" data-op="edges_subpix" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>〰️</span> edges_subpix (亚像素边缘)
+            </button>
+            <button class="dropdown-item" data-op="measure_region" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>📐</span> measure_region (几何特征度量)
+            </button>
+            <button class="dropdown-item" data-op="rgb1_to_gray" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🌓</span> rgb1_to_gray (灰度化)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤卡片容器 -->
+      <div class="pipeline-list" id="pipelineList">
+        <!-- 由 pipeline_ui.js 动态渲染 -->
+      </div>
+    </aside>
+
+    <!-- 1B. Left Column (Alternative): Live Code Studio Panel (敲代码模式) -->
+    <aside class="panel-code-studio" id="panelCodeStudio" style="display:none;">
+      <div class="code-studio-toolbar">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:12px;color:var(--text-muted);">模板:</span>
+          <select id="codeTemplateSelect" style="background:var(--bg-input);color:var(--text-main);border:1px solid var(--border-bright);padding:3px 6px;border-radius:4px;font-size:12px;outline:none;cursor:pointer;">
+            <option value="sobel">Sobel 梯度自定二值化</option>
+            <option value="contours">Canny 矢量轮廓提取</option>
+            <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
+            <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btnRunScript" style="padding:4px 10px;font-size:12px;">
+          ▶ 运行 (Ctrl+Enter)
+        </button>
+      </div>
+
+      <!-- 代码输入区与行号 -->
+      <div class="editor-wrapper">
+        <div class="line-numbers-gutter" id="editorLineNumbers">1</div>
+        <textarea class="script-editor-textarea" id="scriptEditor" spellcheck="false"></textarea>
+      </div>
+
+      <!-- 黑客沙箱终端输出 -->
+      <div class="terminal-panel">
+        <div class="terminal-header">
+          <span>🖥️ Python 沙箱终端控制台 (stdout/stderr)</span>
+          <button class="icon-btn" id="btnClearTerminal" title="清空日志" style="font-size:11px;">🗑️ 清屏</button>
+        </div>
+        <div class="terminal-logs" id="terminalLogs">
+          <div class="console-entry meta">[系统就绪] Python 3.12 沙箱环境加载完毕，随时按 Ctrl+Enter 运行代码...</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 2. Center Column: Viewport & Canvas (HDevelop Graphics Window) -->
+    <section class="panel-viewport" id="viewportContainer">
+      <!-- 视口浮动控制栏 -->
+      <div class="viewport-toolbar">
+        <label><input type="checkbox" id="chkLayerImage" checked> 底图</label>
+        <label><input type="checkbox" id="chkLayerMask" checked> Region 掩膜</label>
+        <label><input type="checkbox" id="chkLayerContours" checked> XLD 轮廓</label>
+        <label><input type="checkbox" id="chkLayerBBox" checked> 标注框</label>
+        <div class="sep"></div>
+        <div class="opacity-slider">
+          <span>透明:</span>
+          <input type="range" id="rangeOpacity" min="0" max="100" value="65">
+        </div>
+        <div class="sep"></div>
+        <button class="icon-btn" id="btnZoomIn" title="放大 (+)">🔍+</button>
+        <button class="icon-btn" id="btnZoomOut" title="缩小 (-)">🔍-</button>
+        <button class="icon-btn" id="btnZoomFit" title="自适应窗口">⛶ 适配</button>
+        <button class="icon-btn" id="btnZoom100" title="100% 原尺寸">1:1</button>
+      </div>
+
+      <!-- 画布舞台 -->
+      <div class="viewport-stage" id="viewportStage">
+        <canvas id="imageCanvas" class="canvas-layer"></canvas>
+        <canvas id="maskCanvas" class="canvas-layer"></canvas>
+        <canvas id="vectorCanvas" class="canvas-layer"></canvas>
+      </div>
+
+      <!-- 底部像素十字丝遥测 HUD -->
+      <div class="viewport-hud">
+        <div class="hud-item">
+          <span>📍 坐标:</span>
+          <span class="hud-val" id="hudCoord">X: -, Y: -</span>
+        </div>
+        <div class="hud-item">
+          <span>🎨 像素:</span>
+          <span class="hud-val" id="hudPixel">RGB: (-, -, -) | Gray: -</span>
+        </div>
+        <div class="hud-item">
+          <span>🛡️ 区域:</span>
+          <span class="hud-val" id="hudRegion">--</span>
+        </div>
+        <div class="hud-item">
+          <span>🔍 缩放:</span>
+          <span class="hud-val" id="hudZoom">100%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Right Column: Inspector & Histogram (HDevelop Operator Window) -->
+    <aside class="panel-inspector">
+      <div class="inspector-tabs">
+        <button class="tab-btn active" data-tab="inspector">⚙️ 算子调谐</button>
+        <button class="tab-btn" data-tab="objects">📊 目标数据 <span id="tabObjCount">(0)</span></button>
+      </div>
+
+      <!-- Tab 1: 算子参数表单 -->
+      <div class="inspector-content" id="tabInspector">
+        <div id="inspectorContent">
+          <!-- 由 pipeline_ui.js 动态填充 -->
+        </div>
+      </div>
+
+      <!-- Tab 2: 连通域目标特征表格 -->
+      <div class="inspector-content" id="tabObjects" style="display:none;">
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>面积 (px)</th>
+                <th>圆度 (0~1)</th>
+                <th>质心 (Y, X)</th>
+                <th>外接框 [Y1,X1,Y2,X2]</th>
+              </tr>
+            </thead>
+            <tbody id="objectTableBody">
+              <!-- 由 app.js 动态填充 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- 模态框 1: Code Exporter Modal (一键生成 Python 独立脚本) -->
+  <div class="modal-backdrop" id="codeModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <span>🚀</span> 工业级 Python (OpenCV) 代码已就绪
+        </h3>
+        <button class="icon-btn" id="btnCloseModal" style="font-size:16px;">✕</button>
+      </div>
+      <pre class="code-editor-area" id="codeViewer"></pre>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCopyCode">📋 复制代码</button>
+        <button class="btn btn-primary" id="btnDownloadPy">💾 下载 .py 文件</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模态框 2: API Integration Hub Modal (对外开放 REST API 接入文档) -->
+  <div class="modal-backdrop" id="apiModal">
+    <div class="modal-card" style="width: 820px;">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <span>🌐</span> 工业级 REST API 开放接入中心
+        </h3>
+        <button class="icon-btn" id="btnCloseApiModal" style="font-size:16px;">✕</button>
+      </div>
+      <div style="padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;">
+        <div style="background:var(--bg-panel-elevated);padding:12px 14px;border-radius:6px;border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <span class="api-method-badge">POST</span>
+            <code style="font-family:var(--font-mono);font-size:14px;color:var(--neon-cyan);margin-left:8px;">/api/v1/predict</code>
+            <span style="font-size:12px;color:var(--text-muted);margin-left:10px;">当前工作台调试流水线已直接映射为产线远程推理服务</span>
+          </div>
+          <a href="/docs" target="_blank" class="btn btn-secondary" style="font-size:11px;text-decoration:none;">
+            📖 打开 Swagger 互动文档 ↗
+          </a>
+        </div>
+
+        <div>
+          <h4 style="font-size:13px;color:var(--text-main);margin-bottom:6px;">1. Python 客户端远程调用代码 (工控机/外部服务)</h4>
+          <pre class="code-editor-area" style="height:150px;">import requests
+
+url = "http://127.0.0.1:8080/api/v1/predict"
+
+# 上传待检测零件图片
+with open("test_part.png", "rb") as f:
+    response = requests.post(url, files={"file": f})
+    result = response.json()
+
+print(f"检测状态: {result['status']}, 耗时: {result['duration_ms']}ms")
+print(f"检出合格目标数量: {result['object_count']}")
+for obj in result["objects"]:
+    print(f" -> 目标 #{obj['id']} 面积={obj['area']}, 圆度={obj['circularity']}")
+</pre>
+        </div>
+
+        <div>
+          <h4 style="font-size:13px;color:var(--text-main);margin-bottom:6px;">2. cURL 终端命令行指令</h4>
+          <pre class="code-editor-area" style="height:60px;">curl -X POST "http://127.0.0.1:8080/api/v1/predict" \
+     -F "file=@your_inspection_image.png"</pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCloseApiModalBtn">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Modules -->
+  <script src="/static/js/viewport.js"></script>
+  <script src="/static/js/histogram.js"></script>
+  <script src="/static/js/pipeline_ui.js"></script>
+  <script src="/static/js/code_editor.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
