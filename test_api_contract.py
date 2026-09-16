@@ -33,6 +33,17 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_pipeline_accepts_filter_operator(self):
+        response = self.client.post(
+            "/api/pipeline/update",
+            json={"steps": [
+                {"id": "read", "operator": "read_image", "params": {}},
+                {"id": "flt", "operator": "filter", "params": {"filter_type": "gaussian", "kernel_size": 5, "sigma": 1.5}},
+            ]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_script_runner_is_disabled_by_default(self):
         response = self.client.post("/api/script/run", json={"code": "print('test')"})
 

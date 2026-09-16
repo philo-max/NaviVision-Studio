@@ -221,6 +221,45 @@ def morphology(
     return Region(mask=new_mask, is_connected=False)
 
 
+def filter_image(
+    img: np.ndarray,
+    filter_type: str = "gaussian",
+    kernel_size: int = 5,
+    sigma: float = 1.5
+) -> np.ndarray:
+    """
+    HALCON 经典平滑/滤波算子 (噪声抑制前置环节):
+    - mean     -> mean_image    (均值滤波: 抑制高斯噪声, 速度快)
+    - gaussian -> gauss_filter  (高斯滤波: 保边平滑, 各向同性)
+    - median   -> median_image  (中值滤波: 椒盐/脉冲噪声克星, 保边性最佳)
+
+    输出与原图同尺寸、同数据类型的滤波结果 (uint8 灰度或彩色三通道)。
+    """
+    if img is None:
+        raise ValueError("滤波输入图像为空")
+
+    k_size = max(1, int(kernel_size))
+    # 卷积核必须为奇数且不小于 1
+    if k_size % 2 == 0:
+        k_size += 1
+
+    ft = (filter_type or "gaussian").lower()
+
+    if ft == "mean":
+        filtered = cv2.blur(img, (k_size, k_size))
+    elif ft == "median":
+        # 中值滤波核必须为 >=3 的奇数
+        median_k = max(3, k_size)
+        if median_k % 2 == 0:
+            median_k += 1
+        filtered = cv2.medianBlur(img, median_k)
+    else:  # gaussian (默认)
+        s = float(sigma) if sigma and float(sigma) > 0 else 0.0
+        filtered = cv2.GaussianBlur(img, (k_size, k_size), s)
+
+    return filtered
+
+
 def _sample_bilinear(img: np.ndarray, px: float, py: float) -> float:
     """双线性插值采样单通道浮点图"""
     h, w = img.shape[:2]

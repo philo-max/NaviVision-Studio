@@ -87,6 +87,12 @@ f:\计算机视觉\
 
 ### 6. 视觉工程持久化 (`.nvproj`)
 - 支持一键导出/导入 `.nvproj` JSON 工程文件，随时保存并无缝复现流水线参数与处理结果。
+### 7. 图像平滑滤波算子 (`filter`)
+- 补齐 HALCON 经典的图像预处理能力，对标 `mean_image` / `gauss_filter` / `median_image`：
+  - **均值滤波 (Mean)**：快速抑制高斯噪声，计算开销最低。
+  - **高斯滤波 (Gaussian)**：各向同性保边平滑，可调核大小与标准差 `sigma`。
+  - **中值滤波 (Median)**：对椒盐/脉冲噪声最有效，同时保留边缘锐度。
+- 输出保持与原图一致的尺寸与数据类型，可直接级联到阈值分割、亚像素边缘等下游算子。
 
 ---
 
@@ -132,5 +138,6 @@ python test_core.py
 | `connection` | `connection` | 打散独立连通域并提取基础外接矩形与面积 |
 | `select_shape` | `select_shape` | 按面积、圆度、长宽比等多维度筛选合格目标 |
 | `morphology` | `dilation / erosion / opening / closing` | 形态学膨胀、腐蚀、开运算降噪、闭运算填孔 |
+| `filter` | `mean_image / gauss_filter / median_image` | 图像平滑滤波：均值、高斯、中值去噪，作为分割前的噪声抑制预处理 |
 | `edges_subpix` | `edges_subpix` | 梯度法向二次抛物线真亚像素 XLD 轮廓提取 |
 | `measure_region` | `measure_region / smallest_rectangle2` | 提取旋转外接矩形 OBB、外接圆、二阶矩主轴与凸度 |
