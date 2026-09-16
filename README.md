@@ -5,6 +5,12 @@
   涵盖算子流水线编排、真·亚像素轮廓插值、工业几何度量、子进程安全沙箱与多租户会话隔离
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/FastAPI-0.100%2B-009688" alt="FastAPI">
+  <img src="https://img.shields.io/badge/tests-13%2F13%20passing-brightgreen" alt="Tests passing">
+</p>
+
 ---
 
 ## 目录结构
