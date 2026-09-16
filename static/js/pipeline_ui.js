@@ -63,6 +63,7 @@ class PipelineUI {
         'connection': '🧩',
         'select_shape': '🎯',
         'morphology': '🔬',
+        'filter': '🧹',
         'edges_subpix': '〰️',
         'measure_region': '📐'
       };
@@ -295,6 +296,46 @@ class PipelineUI {
           </div>
         </div>
       `;
+    } else if (step.operator === 'filter') {
+      const fType = p.filter_type || 'gaussian';
+      const kSize = p.kernel_size || 5;
+      const sig = p.sigma !== undefined ? p.sigma : 1.5;
+
+      html += `
+        <div class="control-group">
+          <div class="control-label">
+            <span>滤波类型 (Filter Type)</span>
+            <span class="control-val">${fType}</span>
+          </div>
+          <select id="selFilterType" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;margin-top:6px;">
+            <option value="gaussian" ${fType === 'gaussian' ? 'selected' : ''}>Gaussian (高斯滤波: 保边平滑去噪)</option>
+            <option value="mean" ${fType === 'mean' ? 'selected' : ''}>Mean (均值滤波: 快速抑制高斯噪声)</option>
+            <option value="median" ${fType === 'median' ? 'selected' : ''}>Median (中值滤波: 椒盐脉冲噪声克星)</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">
+            <span>卷积核大小 (Kernel Size)</span>
+            <span class="control-val" id="lblFilterKernel">${kSize}px</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="sliderFilterKernel" min="3" max="31" step="2" value="${kSize}">
+            <input type="number" id="numFilterKernel" min="1" max="99" step="2" value="${kSize}">
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">
+            <span>高斯标准差 Sigma (仅高斯生效)</span>
+            <span class="control-val" id="lblFilterSigma">${sig}</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="sliderFilterSigma" min="0" max="10" step="0.1" value="${sig}">
+            <input type="number" id="numFilterSigma" min="0" max="50" step="0.1" value="${sig}">
+          </div>
+        </div>
+      `;
     } else if (step.operator === 'edges_subpix') {
       const lowT = p.low_threshold || 30;
       const highT = p.high_threshold || 90;
@@ -486,6 +527,43 @@ class PipelineUI {
         lK.textContent = `${p.kernel_size}px`;
         this.emitUpdateDebounced();
       });
+    } else if (step.operator === 'filter') {
+      const selF = document.getElementById('selFilterType');
+      const sFK = document.getElementById('sliderFilterKernel');
+      const nFK = document.getElementById('numFilterKernel');
+      const lFK = document.getElementById('lblFilterKernel');
+      const sFS = document.getElementById('sliderFilterSigma');
+      const nFS = document.getElementById('numFilterSigma');
+      const lFS = document.getElementById('lblFilterSigma');
+
+      selF.addEventListener('change', (e) => {
+        p.filter_type = e.target.value;
+        this.emitUpdate();
+      });
+      sFK.addEventListener('input', (e) => {
+        p.kernel_size = parseInt(e.target.value);
+        nFK.value = p.kernel_size;
+        lFK.textContent = `${p.kernel_size}px`;
+        this.emitUpdateDebounced();
+      });
+      nFK.addEventListener('change', (e) => {
+        p.kernel_size = parseInt(e.target.value);
+        sFK.value = p.kernel_size;
+        lFK.textContent = `${p.kernel_size}px`;
+        this.emitUpdateDebounced();
+      });
+      sFS.addEventListener('input', (e) => {
+        p.sigma = parseFloat(e.target.value);
+        nFS.value = p.sigma;
+        lFS.textContent = p.sigma;
+        this.emitUpdateDebounced();
+      });
+      nFS.addEventListener('change', (e) => {
+        p.sigma = parseFloat(e.target.value);
+        sFS.value = p.sigma;
+        lFS.textContent = p.sigma;
+        this.emitUpdateDebounced();
+      });
     } else if (step.operator === 'edges_subpix') {
       const sL = document.getElementById('sliderLowT');
       const nL = document.getElementById('numLowT');
@@ -515,6 +593,7 @@ class PipelineUI {
       'connection': { connectivity: 8 },
       'select_shape': { min_area: 50, max_area: 50000, min_circularity: 0.5 },
       'morphology': { op_type: 'opening', kernel_shape: 'circle', kernel_size: 5 },
+      'filter': { filter_type: 'gaussian', kernel_size: 5, sigma: 1.5 },
       'edges_subpix': { low_threshold: 40, high_threshold: 100 },
       'measure_region': {}
     };

@@ -54,6 +54,27 @@ def test_all():
     print(f"       - OBB 中心: {obb['center']}, 半长: ({obb['length1']}, {obb['length2']}), 倾角: {obb['phi']}rad")
     print(f"       - 外接圆半径: {obj0['smallest_circle']['radius']}px, 凸度: {obj0['convexity']}")
 
+    # 4. 图像平滑滤波算子 (filter: mean / gaussian / median) 验证
+    rng = np.random.default_rng(seed=42)
+    noise = rng.integers(0, 50, size=gray.shape, dtype=np.uint8)
+    noisy = cv2.add(gray, noise)
+    gauss_img = ops.filter_image(noisy, "gaussian", 5, 1.5)
+    mean_img = ops.filter_image(noisy, "mean", 5)
+    median_img = ops.filter_image(noisy, "median", 5)
+    assert gauss_img.shape == gray.shape, "高斯滤波输出尺寸与输入不一致"
+    assert mean_img.shape == gray.shape, "均值滤波输出尺寸与输入不一致"
+    assert median_img.shape == gray.shape, "中值滤波输出尺寸与输入不一致"
+    assert gauss_img.dtype == noisy.dtype, "滤波输出数据类型发生变化"
+    # 滤波后整体方差应下降 (噪声被抑制)
+    var_noisy = float(np.var(noisy.astype(np.float32)))
+    var_gauss = float(np.var(gauss_img.astype(np.float32)))
+    var_median = float(np.var(median_img.astype(np.float32)))
+    assert var_gauss < var_noisy, "高斯滤波未能抑制噪声方差"
+    assert var_median < var_noisy, "中值滤波未能抑制噪声方差"
+    print(f"[PASS] 4b. filter 平滑滤波算子验证通过:")
+    print(f"       - 输出尺寸一致: {gauss_img.shape}, dtype={gauss_img.dtype}")
+    print(f"       - 高斯滤波方差: {var_noisy:.1f} -> {var_gauss:.1f}, 中值滤波方差: {var_median:.1f}")
+
     # 4. 真·亚像素边缘提取 (edges_subpix) 验证
     xld_contours = ops.edges_subpix(gray, low_thresh=40, high_thresh=120)
     assert len(xld_contours) > 0, "亚像素轮廓提取结果为空"

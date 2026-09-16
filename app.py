@@ -168,7 +168,7 @@ class PipelineStep(BaseModel):
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     operator: Literal[
         "read_image", "rgb1_to_gray", "threshold", "auto_threshold", "connection",
-        "select_shape", "morphology", "edges_subpix", "measure_region"
+        "select_shape", "morphology", "filter", "edges_subpix", "measure_region"
     ]
     enabled: bool = True
     params: Dict[str, Any] = Field(default_factory=dict)

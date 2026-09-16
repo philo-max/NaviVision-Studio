@@ -107,6 +107,23 @@ def generate_python_code(steps: List[Dict[str, Any]], image_path_placeholder: st
             lines.append("    print(f'  [SelectShape] Retained {len(matched_objects)} qualified targets')")
             lines.append("")
 
+        elif op == "filter":
+            f_type = str(p.get("filter_type", "gaussian")).lower()
+            k_size = int(p.get("kernel_size", 5))
+            sigma = float(p.get("sigma", 1.5))
+            k_eff = max(1, k_size)
+            if k_eff % 2 == 0:
+                k_eff += 1
+            lines.append(f"    # 图像平滑滤波 (HALCON: mean_image / gauss_filter / median_image) 类型: {f_type}, 核: {k_eff}")
+            if f_type == "mean":
+                lines.append(f"    gray = cv2.blur(gray, ({k_eff}, {k_eff}))")
+            elif f_type == "median":
+                lines.append(f"    gray = cv2.medianBlur(gray, {max(3, k_eff)})")
+            else:
+                lines.append(f"    gray = cv2.GaussianBlur(gray, ({k_eff}, {k_eff}), {sigma})")
+            lines.append("    print(f'  [Filter] Applied " + f_type + " smoothing kernel=" + str(k_eff) + "')")
+            lines.append("")
+
         elif op == "edges_subpix":
             low_t = float(p.get("low_threshold", 30))
             high_t = float(p.get("high_threshold", 90))

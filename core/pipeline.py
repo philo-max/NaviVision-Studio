@@ -350,6 +350,41 @@ class Pipeline:
             )
             return morphed, res
 
+        elif op == "filter":
+            f_type = str(params.get("filter_type", "gaussian")).lower()
+            k_size = int(params.get("kernel_size", 5))
+            sigma = float(params.get("sigma", 1.5))
+
+            # 滤波对象: 优先承接上游图像数据, 否则使用底图灰度
+            target_img = input_data if isinstance(input_data, np.ndarray) else gray
+            filtered = ops.filter_image(target_img, f_type, k_size, sigma)
+
+            gray_filtered = ops.rgb1_to_gray(filtered)
+            hist = ops.calc_histogram(gray_filtered)
+
+            k_effective = max(1, k_size)
+            if k_effective % 2 == 0:
+                k_effective += 1
+            if f_type == "median":
+                k_effective = max(3, k_effective)
+
+            summary = {
+                "filter_type": f_type,
+                "kernel_size": k_effective,
+                "sigma": round(sigma, 3) if f_type == "gaussian" else None,
+                "output_channels": 1 if len(filtered.shape) == 2 else filtered.shape[2]
+            }
+            res = StepResult(
+                step_id=step_id,
+                operator=op,
+                duration_ms=0.0,
+                output_type="image",
+                preview_base64=encode_image_base64(filtered),
+                histogram=hist,
+                summary=summary
+            )
+            return filtered, res
+
         elif op == "edges_subpix":
             low_t = float(params.get("low_threshold", 30))
             high_t = float(params.get("high_threshold", 90))
