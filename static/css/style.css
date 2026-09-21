@@ -91,31 +91,6 @@ body {
   gap: 12px;
 }
 
-.sample-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--bg-input);
-  padding: 4px 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  font-size: 13px;
-}
-
-.sample-selector select {
-  background: transparent;
-  color: var(--text-main);
-  border: none;
-  outline: none;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.sample-selector select option {
-  background: var(--bg-panel-elevated);
-  color: var(--text-main);
-}
-
 .header-actions {
   display: flex;
   align-items: center;
@@ -904,7 +879,6 @@ body {
   font-size: 12px;
 }
 
-.sample-selector,
 .mode-btn {
   white-space: nowrap;
 }
@@ -912,17 +886,6 @@ body {
 .icon-btn {
   gap: 4px;
   font-size: 12px;
-}
-
-.toolbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border-bright);
-  margin: 0 4px;
-}
-
-.sample-label {
-  color: var(--text-muted);
 }
 
 .hud-label {
@@ -1101,7 +1064,6 @@ body {
   .app-header .btn-accent .btn-label,
   .mode-btn .btn-label,
   .app-title .subtitle,
-  .sample-label,
   .badge-metric {
     display: none;
   }
@@ -1145,18 +1107,9 @@ body {
   background: rgba(125, 176, 255, 0.14);
 }
 
-.app-header .sample-selector,
 .app-header .mode-switch-group {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.14);
-}
-
-.app-header .sample-selector select {
-  color: var(--ink-text);
-}
-
-.app-header .sample-label {
-  color: var(--ink-muted);
 }
 
 .app-header .mode-btn {
@@ -1171,10 +1124,6 @@ body {
   background: var(--accent);
   color: var(--on-accent);
   box-shadow: none;
-}
-
-.app-header .toolbar-divider {
-  background: rgba(255, 255, 255, 0.18);
 }
 
 .app-header .btn-secondary {
@@ -1306,3 +1255,41 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Empty workspace prompt shown until an image is loaded */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  cursor: default;
+}
+
+.empty-state[hidden] {
+  display: none;
+}
+
+.empty-state-icon {
+  width: 40px;
+  height: 40px;
+  stroke-width: 1.4;
+  color: var(--accent-on-ink);
+}
+
+.empty-state-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-text);
+}
+
+.empty-state-hint {
+  max-width: 360px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
