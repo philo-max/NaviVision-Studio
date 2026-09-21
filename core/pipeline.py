@@ -309,6 +309,7 @@ class Pipeline:
                         "area": o.area,
                         "circularity": round(o.circularity, 3),
                         "aspect_ratio": round(o.aspect_ratio, 2),
+                        "bbox": o.bbox,
                         "centroid": [round(o.centroid[0], 1), round(o.centroid[1], 1)]
                     } for o in filtered.objects
                 ]

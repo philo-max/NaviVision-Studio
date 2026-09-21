@@ -44,6 +44,24 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_pills_sample_region_objects_carry_bbox_for_viewport(self):
+        response = self.client.post("/api/load_sample", json={"id": "pills"})
+
+        self.assertEqual(response.status_code, 200)
+        drawn_steps = 0
+        for step in response.json()["results"]:
+            summary = step.get("summary") or {}
+            objects = summary.get("objects") or summary.get("objects_info") or []
+            if not step.get("mask_base64") or not objects:
+                continue
+            drawn_steps += 1
+            for obj in objects:
+                self.assertEqual(
+                    len(obj.get("bbox", [])), 4,
+                    f"{step['operator']} object {obj.get('id')} lacks a 4-element bbox",
+                )
+        self.assertGreaterEqual(drawn_steps, 2)
+
     def test_script_runner_is_disabled_by_default(self):
         response = self.client.post("/api/script/run", json={"code": "print('test')"})
 

@@ -182,6 +182,7 @@ class StudioViewport {
       this.ctxMask.font = '11px monospace';
       
       this.objects.forEach(obj => {
+        if (!obj.bbox) return;
         const [y1, x1, y2, x2] = obj.bbox;
         const w = x2 - x1;
         const h = y2 - y1;
