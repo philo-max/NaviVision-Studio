@@ -55,19 +55,6 @@ class PipelineUI {
       card.className = `step-card ${isActive ? 'active' : ''} ${!isEnabled ? 'disabled' : ''}`;
       card.dataset.id = step.id;
 
-      const opIcons = {
-        'read_image': '📥',
-        'rgb1_to_gray': '🌓',
-        'threshold': '🎚️',
-        'auto_threshold': '🪄',
-        'connection': '🧩',
-        'select_shape': '🎯',
-        'morphology': '🔬',
-        'filter': '🧹',
-        'edges_subpix': '〰️',
-        'measure_region': '📐'
-      };
-
       const durationText = res ? `${res.duration_ms}ms` : '...';
       const outputType = res ? res.output_type : (step.operator === 'edges_subpix' ? 'xld' : 'region');
 
@@ -75,20 +62,19 @@ class PipelineUI {
         <div class="step-card-header">
           <div class="step-info">
             <span class="step-idx">${idx + 1}</span>
-            <span>${opIcons[step.operator] || '⚙️'}</span>
             <span class="step-title">${step.operator}</span>
           </div>
           <div class="step-actions">
             <button class="icon-btn toggle-btn" title="${isEnabled ? '禁用' : '启用'}">
-              ${isEnabled ? '👁️' : '👁️‍🗨️'}
+              <svg class="icon"><use href="#${isEnabled ? 'i-eye' : 'i-eye-off'}"/></svg>
             </button>
             ${step.operator !== 'read_image' ? `
-              <button class="icon-btn danger delete-btn" title="删除">🗑️</button>
+              <button class="icon-btn danger delete-btn" title="删除"><svg class="icon"><use href="#i-trash"/></svg></button>
             ` : ''}
           </div>
         </div>
         <div class="step-card-footer">
-          <span class="step-timing">⚡ ${durationText}</span>
+          <span class="step-timing"><svg class="icon"><use href="#i-bolt"/></svg>${durationText}</span>
           <span class="step-type-badge">${outputType}</span>
         </div>
       `;
@@ -138,7 +124,7 @@ class PipelineUI {
     const p = step.params || (step.params = {});
     let html = `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <h4 style="font-size:14px;color:var(--neon-cyan);display:flex;align-items:center;gap:6px;">
+        <h4 style="font-size:14px;color:var(--accent);display:flex;align-items:center;gap:6px;">
           <span>⚙️</span> ${step.operator} 参数设定
         </h4>
         <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">${step.id}</span>
@@ -379,7 +365,7 @@ class PipelineUI {
             <span>📊 算子输出遥测</span>
             <span class="control-val">${res.duration_ms}ms</span>
           </div>
-          <pre style="font-family:var(--font-mono);font-size:11px;color:var(--neon-green);line-height:1.5;background:#06080e;padding:8px;border-radius:4px;overflow-x:auto;">${JSON.stringify(res.summary, null, 2)}</pre>
+          <pre style="font-family:var(--font-mono);font-size:11px;color:var(--success);line-height:1.5;background:var(--bg-panel-elevated);padding:8px;border-radius:4px;overflow-x:auto;">${JSON.stringify(res.summary, null, 2)}</pre>
         </div>
       `;
     }

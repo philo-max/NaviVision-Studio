@@ -255,7 +255,7 @@ class StudioViewport {
         const inMask = maskPixel[3] > 0;
         if (this.hudRegion) {
           this.hudRegion.textContent = inMask ? 'ACTIVE REGION' : 'BACKGROUND';
-          this.hudRegion.style.color = inMask ? 'var(--neon-cyan)' : 'var(--text-muted)';
+          this.hudRegion.style.color = inMask ? 'var(--accent)' : 'var(--text-muted)';
         }
       } catch (err) {
         // ImageData 安全保护

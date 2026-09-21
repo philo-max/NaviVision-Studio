@@ -9,59 +9,82 @@
 </head>
 <body>
 
+  <!-- Icon Sprite -->
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h4a2 2 0 0 1 2 2v7"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m21 15-4.5-4.5L6 21"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 7 5 5-5 5M12 17h8"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.5 6.6A17 17 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 4.4-1"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></symbol>
+  </svg>
+
   <!-- Top App Header -->
   <header class="app-header">
     <div class="brand-section">
       <span class="logo-badge">NAVI-CV</span>
       <h1 class="app-title">
-        NaviVision Studio <span class="subtitle">OpenDevelop v1.1</span>
+        <span class="app-title-text">NaviVision Studio</span>
+        <span class="subtitle">v1.1</span>
       </h1>
     </div>
 
-    <!-- 模式切换: 算子模式 vs 代码模式 -->
     <div class="mode-switch-group">
-      <button class="mode-btn active" id="btnModePipeline">
-        <span>🧩</span> 可视化流水线
+      <button class="mode-btn active" id="btnModePipeline" title="可视化流水线">
+        <svg class="icon"><use href="#i-flow"/></svg><span class="btn-label">可视化流水线</span>
       </button>
-      <button class="mode-btn" id="btnModeCode">
-        <span>💻</span> Python 脚本模式
+      <button class="mode-btn" id="btnModeCode" title="Python 脚本模式">
+        <svg class="icon"><use href="#i-code"/></svg><span class="btn-label">Python 脚本</span>
       </button>
     </div>
 
     <div class="header-center">
-      <div class="sample-selector">
-        <span>🏭 案例:</span>
+      <label class="sample-selector">
+        <span class="sample-label">案例</span>
         <select id="sampleSelect">
           <option value="pills">载入中...</option>
         </select>
-      </div>
-      <input type="file" id="uploadInput" accept="image/*" style="display:none;">
+      </label>
+      <span class="toolbar-divider"></span>
+      <input type="file" id="uploadInput" accept="image/*" hidden>
+      <input type="file" id="projectFileInput" accept=".nvproj,.json" hidden>
+      <input type="file" id="batchInput" accept="image/*" multiple hidden>
       <button class="btn btn-secondary" id="btnUpload" title="载入本地工业相机照片或测试图">
-        📁 打开图片
+        <svg class="icon"><use href="#i-image"/></svg><span class="btn-label">打开图片</span>
       </button>
       <button class="btn btn-secondary" id="btnSaveProject" title="导出保存为 .nvproj 视觉工程文件">
-        💾 保存工程
+        <svg class="icon"><use href="#i-save"/></svg><span class="btn-label">保存工程</span>
       </button>
       <button class="btn btn-secondary" id="btnOpenProject" title="打开并恢复 .nvproj 视觉工程文件">
-        📂 打开工程
+        <svg class="icon"><use href="#i-folder"/></svg><span class="btn-label">打开工程</span>
       </button>
-      <input type="file" id="projectFileInput" accept=".nvproj,.json" style="display:none;">
-      <input type="file" id="batchInput" accept="image/*" multiple style="display:none;">
       <button class="btn btn-primary" id="btnBatchInspect" title="按当前流水线批量检测，并导出判定报告">
-        🏭 批量检测
+        <svg class="icon"><use href="#i-layers"/></svg><span class="btn-label">批量检测</span>
       </button>
     </div>
 
     <div class="header-actions">
       <div class="badge-metric" title="计算引擎响应延迟">
-        <span>⚡ 延迟:</span>
+        <svg class="icon"><use href="#i-bolt"/></svg>
         <span id="hudLatency">0ms</span>
       </div>
       <button class="btn btn-secondary" id="btnOpenApiHub" title="查看对外开放的工业 REST API 与客户端调用代码">
-        🌐 开放 API
+        <svg class="icon"><use href="#i-globe"/></svg><span class="btn-label">开放 API</span>
       </button>
       <button class="btn btn-accent" id="btnExportCode" title="生成并导出工业级 Python / OpenCV 脚本">
-        🚀 导出 Python 代码
+        <svg class="icon"><use href="#i-code"/></svg><span class="btn-label">导出代码</span>
       </button>
     </div>
   </header>
@@ -72,39 +95,39 @@
     <!-- 1A. Left Column: Operator Pipeline (HDevelop Program Window) -->
     <aside class="panel-pipeline" id="panelPipeline">
       <div class="panel-header">
-        <h3>📋 算子流水线 <span class="step-count" id="stepCountBadge">0 算子</span></h3>
-        <div style="position:relative;">
-          <button class="btn btn-primary" id="btnAddOp" style="padding:4px 10px;font-size:12px;">
-            + 添加算子
+        <h3><svg class="icon"><use href="#i-flow"/></svg>算子流水线 <span class="step-count" id="stepCountBadge">0 算子</span></h3>
+        <div class="dropdown-anchor">
+          <button class="btn btn-primary btn-sm" id="btnAddOp">
+            <svg class="icon"><use href="#i-plus"/></svg>添加算子
           </button>
           <!-- 下拉算子菜单 -->
-          <div id="addOpMenu" style="display:none;position:absolute;top:32px;right:0;width:180px;background:var(--bg-panel-elevated);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:var(--shadow-dropdown);z-index:100;padding:6px 0;">
-            <button class="dropdown-item" data-op="threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🎚️</span> threshold (双阈值)
+          <div id="addOpMenu" class="dropdown-menu">
+            <button class="dropdown-item" data-op="threshold">
+              threshold (双阈值)
             </button>
-            <button class="dropdown-item" data-op="auto_threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🪄</span> auto_threshold (Otsu)
+            <button class="dropdown-item" data-op="auto_threshold">
+              auto_threshold (Otsu)
             </button>
-            <button class="dropdown-item" data-op="connection" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🧩</span> connection (打散连通)
+            <button class="dropdown-item" data-op="connection">
+              connection (打散连通)
             </button>
-            <button class="dropdown-item" data-op="select_shape" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🎯</span> select_shape (特征筛选)
+            <button class="dropdown-item" data-op="select_shape">
+              select_shape (特征筛选)
             </button>
-            <button class="dropdown-item" data-op="morphology" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🔬</span> morphology (形态学)
+            <button class="dropdown-item" data-op="morphology">
+              morphology (形态学)
             </button>
-            <button class="dropdown-item" data-op="filter" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🧹</span> filter (平滑滤波)
+            <button class="dropdown-item" data-op="filter">
+              filter (平滑滤波)
             </button>
-            <button class="dropdown-item" data-op="edges_subpix" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>〰️</span> edges_subpix (亚像素边缘)
+            <button class="dropdown-item" data-op="edges_subpix">
+              edges_subpix (亚像素边缘)
             </button>
-            <button class="dropdown-item" data-op="measure_region" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>📐</span> measure_region (几何特征度量)
+            <button class="dropdown-item" data-op="measure_region">
+              measure_region (几何特征度量)
             </button>
-            <button class="dropdown-item" data-op="rgb1_to_gray" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🌓</span> rgb1_to_gray (灰度化)
+            <button class="dropdown-item" data-op="rgb1_to_gray">
+              rgb1_to_gray (灰度化)
             </button>
           </div>
         </div>
@@ -117,19 +140,19 @@
     </aside>
 
     <!-- 1B. Left Column (Alternative): Live Code Studio Panel (敲代码模式) -->
-    <aside class="panel-code-studio" id="panelCodeStudio" style="display:none;">
+    <aside class="panel-code-studio" id="panelCodeStudio">
       <div class="code-studio-toolbar">
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:12px;color:var(--text-muted);">模板:</span>
-          <select id="codeTemplateSelect" style="background:var(--bg-input);color:var(--text-main);border:1px solid var(--border-bright);padding:3px 6px;border-radius:4px;font-size:12px;outline:none;cursor:pointer;">
+        <label class="field-inline">
+          <span class="field-label">模板</span>
+          <select id="codeTemplateSelect" class="select-sm">
             <option value="sobel">Sobel 梯度自定二值化</option>
             <option value="contours">Canny 矢量轮廓提取</option>
             <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
             <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
           </select>
-        </div>
-        <button class="btn btn-primary" id="btnRunScript" style="padding:4px 10px;font-size:12px;">
-          ▶ 运行 (Ctrl+Enter)
+        </label>
+        <button class="btn btn-primary btn-sm" id="btnRunScript">
+          <svg class="icon"><use href="#i-play"/></svg>运行 (Ctrl+Enter)
         </button>
       </div>
 
@@ -142,8 +165,8 @@
       <!-- 黑客沙箱终端输出 -->
       <div class="terminal-panel">
         <div class="terminal-header">
-          <span>🖥️ Python 沙箱终端控制台 (stdout/stderr)</span>
-          <button class="icon-btn" id="btnClearTerminal" title="清空日志" style="font-size:11px;">🗑️ 清屏</button>
+          <span class="terminal-title"><svg class="icon"><use href="#i-terminal"/></svg>Python 沙箱终端 (stdout / stderr)</span>
+          <button class="icon-btn" id="btnClearTerminal" title="清空日志"><svg class="icon"><use href="#i-trash"/></svg>清屏</button>
         </div>
         <div class="terminal-logs" id="terminalLogs">
           <div class="console-entry meta">[系统就绪] Python 3.12 沙箱环境加载完毕，随时按 Ctrl+Enter 运行代码...</div>
@@ -165,9 +188,9 @@
           <input type="range" id="rangeOpacity" min="0" max="100" value="65">
         </div>
         <div class="sep"></div>
-        <button class="icon-btn" id="btnZoomIn" title="放大 (+)">🔍+</button>
-        <button class="icon-btn" id="btnZoomOut" title="缩小 (-)">🔍-</button>
-        <button class="icon-btn" id="btnZoomFit" title="自适应窗口">⛶ 适配</button>
+        <button class="icon-btn" id="btnZoomIn" title="放大 (+)">+</button>
+        <button class="icon-btn" id="btnZoomOut" title="缩小 (-)">&minus;</button>
+        <button class="icon-btn" id="btnZoomFit" title="自适应窗口">适配</button>
         <button class="icon-btn" id="btnZoom100" title="100% 原尺寸">1:1</button>
       </div>
 
@@ -181,19 +204,19 @@
       <!-- 底部像素十字丝遥测 HUD -->
       <div class="viewport-hud">
         <div class="hud-item">
-          <span>📍 坐标:</span>
+          <span class="hud-label">坐标</span>
           <span class="hud-val" id="hudCoord">X: -, Y: -</span>
         </div>
         <div class="hud-item">
-          <span>🎨 像素:</span>
+          <span class="hud-label">像素</span>
           <span class="hud-val" id="hudPixel">RGB: (-, -, -) | Gray: -</span>
         </div>
         <div class="hud-item">
-          <span>🛡️ 区域:</span>
+          <span class="hud-label">区域</span>
           <span class="hud-val" id="hudRegion">--</span>
         </div>
         <div class="hud-item">
-          <span>🔍 缩放:</span>
+          <span class="hud-label">缩放</span>
           <span class="hud-val" id="hudZoom">100%</span>
         </div>
       </div>
@@ -202,8 +225,8 @@
     <!-- 3. Right Column: Inspector & Histogram (HDevelop Operator Window) -->
     <aside class="panel-inspector">
       <div class="inspector-tabs">
-        <button class="tab-btn active" data-tab="inspector">⚙️ 算子调谐</button>
-        <button class="tab-btn" data-tab="objects">📊 目标数据 <span id="tabObjCount">(0)</span></button>
+        <button class="tab-btn active" data-tab="inspector">算子调谐</button>
+        <button class="tab-btn" data-tab="objects">目标数据 <span id="tabObjCount">(0)</span></button>
       </div>
 
       <!-- Tab 1: 算子参数表单 -->
@@ -214,8 +237,8 @@
       </div>
 
       <!-- Tab 2: 连通域目标特征表格 -->
-      <div class="inspector-content" id="tabObjects" style="display:none;">
-        <div style="overflow-x:auto;">
+      <div class="inspector-content" id="tabObjects">
+        <div class="table-scroll">
           <table class="data-table">
             <thead>
               <tr>
@@ -241,42 +264,42 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3 class="modal-title">
-          <span>🚀</span> 工业级 Python (OpenCV) 代码已就绪
+          <svg class="icon"><use href="#i-code"/></svg>Python (OpenCV) 代码已就绪
         </h3>
-        <button class="icon-btn" id="btnCloseModal" style="font-size:16px;">✕</button>
+        <button class="icon-btn" id="btnCloseModal" title="关闭"><svg class="icon"><use href="#i-close"/></svg></button>
       </div>
       <pre class="code-editor-area" id="codeViewer"></pre>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="btnCopyCode">📋 复制代码</button>
-        <button class="btn btn-primary" id="btnDownloadPy">💾 下载 .py 文件</button>
+        <button class="btn btn-secondary" id="btnCopyCode">复制代码</button>
+        <button class="btn btn-primary" id="btnDownloadPy"><svg class="icon"><use href="#i-download"/></svg>下载 .py 文件</button>
       </div>
     </div>
   </div>
 
   <!-- 模态框 2: API Integration Hub Modal (对外开放 REST API 接入文档) -->
   <div class="modal-backdrop" id="apiModal">
-    <div class="modal-card" style="width: 820px;">
+    <div class="modal-card modal-card-wide">
       <div class="modal-header">
         <h3 class="modal-title">
-          <span>🌐</span> 工业级 REST API 开放接入中心
+          <svg class="icon"><use href="#i-globe"/></svg>REST API 开放接入中心
         </h3>
-        <button class="icon-btn" id="btnCloseApiModal" style="font-size:16px;">✕</button>
+        <button class="icon-btn" id="btnCloseApiModal" title="关闭"><svg class="icon"><use href="#i-close"/></svg></button>
       </div>
-      <div style="padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;">
-        <div style="background:var(--bg-panel-elevated);padding:12px 14px;border-radius:6px;border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-body">
+        <div class="endpoint-bar">
           <div>
             <span class="api-method-badge">POST</span>
-            <code style="font-family:var(--font-mono);font-size:14px;color:var(--neon-cyan);margin-left:8px;">/api/v1/predict</code>
-            <span style="font-size:12px;color:var(--text-muted);margin-left:10px;">当前工作台调试流水线已直接映射为产线远程推理服务</span>
+            <code class="endpoint-path">/api/v1/predict</code>
+            <span class="endpoint-desc">当前工作台调试流水线已直接映射为产线远程推理服务</span>
           </div>
-          <a href="/docs" target="_blank" class="btn btn-secondary" style="font-size:11px;text-decoration:none;">
-            📖 打开 Swagger 互动文档 ↗
+          <a href="/docs" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+            <svg class="icon"><use href="#i-book"/></svg>Swagger 文档
           </a>
         </div>
 
         <div>
-          <h4 style="font-size:13px;color:var(--text-main);margin-bottom:6px;">1. Python 客户端远程调用代码 (工控机/外部服务)</h4>
-          <pre class="code-editor-area" style="height:150px;">import requests
+          <h4 class="section-title">1. Python 客户端远程调用代码 (工控机/外部服务)</h4>
+          <pre class="code-editor-area code-editor-area--md">import requests
 
 url = "http://127.0.0.1:8080/api/v1/predict"
 
@@ -293,8 +316,8 @@ for obj in result["objects"]:
         </div>
 
         <div>
-          <h4 style="font-size:13px;color:var(--text-main);margin-bottom:6px;">2. cURL 终端命令行指令</h4>
-          <pre class="code-editor-area" style="height:60px;">curl -X POST "http://127.0.0.1:8080/api/v1/predict" \
+          <h4 class="section-title">2. cURL 终端命令行指令</h4>
+          <pre class="code-editor-area code-editor-area--sm">curl -X POST "http://127.0.0.1:8080/api/v1/predict" \
      -F "file=@your_inspection_image.png"</pre>
         </div>
       </div>
