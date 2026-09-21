@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const centroidStr = obj.centroid ? `(${obj.centroid[0]}, ${obj.centroid[1]})` : 'N/A';
       html += `
         <tr data-obj-id="${obj.id}">
-          <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
+          <td style="color:var(--accent);font-weight:bold;">#${obj.id}</td>
           <td>${obj.area}</td>
           <td>${circ}</td>
           <td>${centroidStr}</td>
@@ -232,7 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
     files.forEach(file => formData.append('files', file));
     formData.append('rules', JSON.stringify({ min_objects: 1 }));
     btnBatchInspect.disabled = true;
-    btnBatchInspect.textContent = '⏳ 检测中...';
+    btnBatchInspect.querySelector('.btn-label').textContent = '检测中...';
 
     try {
       const response = await apiFetch('/api/v1/batch-predict', { method: 'POST', body: formData });
@@ -255,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('批量检测失败: ' + err.message);
     } finally {
       btnBatchInspect.disabled = false;
-      btnBatchInspect.textContent = '🏭 批量检测';
+      btnBatchInspect.querySelector('.btn-label').textContent = '批量检测';
       batchInput.value = '';
     }
   });
@@ -369,9 +369,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnCopyCode.addEventListener('click', async () => {
     await navigator.clipboard.writeText(codeViewer.textContent);
-    btnCopyCode.textContent = '✅ 已复制到剪贴板！';
+    btnCopyCode.textContent = '已复制到剪贴板';
     setTimeout(() => {
-      btnCopyCode.textContent = '📋 复制代码';
+      btnCopyCode.textContent = '复制代码';
     }, 2000);
   });
 
@@ -412,7 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const centroidStr = obj.centroid ? `(${Math.round(obj.centroid[0])}, ${Math.round(obj.centroid[1])})` : 'N/A';
           html += `
             <tr data-obj-id="${obj.id}">
-              <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
+              <td style="color:var(--accent);font-weight:bold;">#${obj.id}</td>
               <td>${obj.area}</td>
               <td>${circ}</td>
               <td>${centroidStr}</td>
