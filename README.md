@@ -2,13 +2,14 @@
 
 <p align="center">
   <b>轻量级交互式机器视觉 IDE · HALCON / HDevelop 开源平替架构</b><br>
-  涵盖算子流水线编排、真·亚像素轮廓插值、工业几何度量、子进程安全沙箱与多租户会话隔离
+  涵盖算子流水线编排、多目标模板匹配、ROI 交互与卡尺测量、分支/多图流水线、子进程安全沙箱与多租户会话隔离
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
   <img src="https://img.shields.io/badge/FastAPI-0.100%2B-009688" alt="FastAPI">
   <img src="https://img.shields.io/badge/tests-13%2F13%20passing-brightgreen" alt="Tests passing">
+  <img src="https://github.com/philo-max/NaviVision-Studio/actions/workflows/test.yml/badge.svg" alt="CI">
 </p>
 
 ---
@@ -22,6 +23,7 @@ f:\计算机视觉\
 ├── test_core.py               # 核心算法与引擎自动化测试套件 (13 项全量断言)
 ├── .gitignore                 # Git 忽略配置
 ├── README.md                  # 项目架构与使用说明
+├── .github/workflows/test.yml # GitHub Actions CI (自动运行核心与 API 契约测试)
 │
 ├── core/                      # 视觉处理核心模块包
 │   ├── __init__.py            # 包导出入口
@@ -66,10 +68,11 @@ f:\计算机视觉\
   $$H_i = \text{SHA256}(H_{i-1} + \text{operator} + \text{params} + \text{enabled})$$
 - 上游参数被修改时，下游过时缓存瞬间熔断失效，调参即时响应；未变步骤 0ms 复用。
 
-### 2. 真·亚像素边缘插值 (`edges_subpix`)
-- 抛弃整像素类型强转假象，基于 **Steger / Facet Model** 实现 Sobel 梯度法向二次抛物线三点插值：
+### 2. 整像素边缘 + 法向亚像素修正 (`edges_subpix`)
+- 先用 Canny 提取整像素边缘轮廓，再沿边缘法向对梯度幅值做二次抛物线三点插值：
   $$t^* = \frac{M(-1) - M(+1)}{2(M(-1) - 2M(0) + M(+1))}$$
-- 产出真浮点坐标 XLD 轮廓（亚像素位移达 0.1~0.8px），精确累加欧氏折线弧长。
+- 产出浮点坐标 XLD 轮廓，并累加欧氏折线弧长。
+- **能力边界**：这是对整像素边缘的法向插值修正，并非 HALCON 基于 Steger-Hessian 脊线检测的真亚像素边缘；精度受整像素边缘质量限制。
 
 ### 3. 工业级几何度量算子 (`measure_region`)
 - 输出完整工业特征：
@@ -94,6 +97,54 @@ f:\计算机视觉\
   - **中值滤波 (Median)**：对椒盐/脉冲噪声最有效，同时保留边缘锐度。
 - 输出保持与原图一致的尺寸与数据类型，可直接级联到阈值分割、亚像素边缘等下游算子。
 
+### 8. 色彩空间扩展 (`rgb_to_hsv` / `hsv_threshold`)
+- 新增 HSV 色彩空间转换与彩色阈值分割，色相/饱和度/明度三维范围筛选，解决彩色目标（如药丸颜色分类）识别需求。
+
+### 9. 形状模板匹配 (`find_shape_model`)
+- 灰度 NCC 匹配，支持**同图多目标**（多峰值提取 + 跨尺度/角度统一 NMS 去重）、多尺度、多角度（缺省自动 0~360° 扫描）。
+- **图像金字塔（pyrDown）由粗到精搜索**加速，并对相关峰做二次曲面插值给出亚像素中心。
+- 支持极性无关匹配（兼容亮目标/暗背景反转）。
+- **能力边界**：工作在灰度 NCC 层面，非 HALCON 基于边缘方向的形状匹配，暂不具备其全角度测量与亚像素边缘一致性评分的全部能力。
+
+### 10. 轮廓多边形近似 (`gen_contour_polygon`)
+- 封装 `cv2.approxPolyDP`，对 XLD 轮廓做多边形简化并提取拐点序列，配合已有亚像素轮廓完成形状简化与角点提取。
+
+### 11. Blob 特征扩展 (`select_shape`)
+- `select_shape` 判据新增 **矩形度 (Rectangularity)** 与 **Hu 七阶不变矩**（可选按参考矩距离筛选），支撑更复杂的缺陷分类规则。
+
+### 12. 条码 / 二维码识别 (`read_barcode`)
+- 基于 OpenCV 内置 `QRCodeDetector` 识别 QR 码（零额外依赖）；若安装 `pyzbar` 则额外支持一维条码与 Data Matrix。
+
+### 13. 棋盘格比例标定 (`calibrate`)
+- 棋盘格角点检测 + 亚像素细化，输出单一 像素/物理单位 换算系数，使几何度量可换算为真实工业单位。
+- **能力边界**：仅输出平面比例系数，不求解相机内参、畸变系数与透视校正，不能替代 HALCON `calibrate_cameras` 的测量级标定。
+
+### 14. OCR 文字识别 (`read_text`)
+- 可选接入 Tesseract（`pytesseract`）；未安装时抛出明确提示并优雅降级，不影响其他算子。
+
+### 15. 会话磁盘持久化 (`SessionManager`)
+- 可选启用磁盘 JSON 落盘（设置 `NAVIVISION_SESSION_DIR`），会话重启不丢失；支持过期与容量淘汰、启动批量恢复。
+
+### 16. CI 持续集成 (`.github/workflows/test.yml`)
+- GitHub Actions 在 push / PR 时自动运行 `test_core.py` 与 `test_api_contract.py`（Python 3.10 / 3.12 矩阵），杜绝"测试形同虚设"。
+
+### 17. ROI 交互与区域归约 (`reduce_domain`)
+- 支持矩形 / 圆 / 多边形三种 ROI（前端可在视口直接绘制，后端 `create_mask_from_geometry` 生成掩膜），区域外像素置零、画布尺寸不变，不破坏下游坐标系。
+
+### 18. 一维卡尺测量 (`measure_pos`)
+- 沿任意测量线采样灰度剖面，高斯平滑 + 一阶导数极值 + 抛物线插值，输出亚像素边缘点与跨距，用于尺寸/间距测量。
+
+### 19. 流水线分支与多图 (`input_from` / `merge_images`)
+- 步骤可声明 `input_from` 引用任意上游步骤输出，实现分支与多图；`merge_images` 负责把两路图像合并；`read_image` 支持流水线中途换图。
+
+### 20. 深度学习推理节点 (`onnx_inference`)
+- 通过 ONNX Runtime 运行已训练模型（分类 / 通用）。未安装 `onnxruntime` 或模型缺失时抛出明确提示并优雅降级，不影响整条流水线。
+
+### 21. 原生 HDevelop 4GL 语言引擎与双向转译 (`core/hdev_engine.py`)
+- **纯自研语法解析器 (`HDevParser`)**：原生解析 `.hdev` / `.hdvp` XML 与纯文本脚本，支持标准 4 槽位语法 `(In : Out : CtrlIn : CtrlOut)`、标准算子参数自动推导、控制流与注释。
+- **解释执行沙箱 (`HDevInterpreter`)**：维护 `Iconic` (Image/Region/XLD) 与 `Control` (元组/标量) 变量空间，支持视口目标切换（如在 Canvas 上直接检查任一阶段中间变量）。
+- **双向无损转译器 (`HDevTranspiler`)**：支持将 HDevelop 脚本一键转译并同步至可视化卡片流水线，亦支持将卡片流水线导出为 `.hdev` 标准脚本。
+
 ---
 
 ## 快速开始
@@ -109,9 +160,11 @@ python app.py
 ```
 启动后在浏览器中访问：**[http://127.0.0.1:8080](http://127.0.0.1:8080)**
 
-### 3. 运行全量核心测试套件
+### 3. 运行全量核心与 HDevelop 测试套件
 ```bash
 python test_core.py
+python test_api_contract.py
+python test_hdev.py
 ```
 
 ### 4. 构建 Windows 应用程序
@@ -139,5 +192,16 @@ python test_core.py
 | `select_shape` | `select_shape` | 按面积、圆度、长宽比等多维度筛选合格目标 |
 | `morphology` | `dilation / erosion / opening / closing` | 形态学膨胀、腐蚀、开运算降噪、闭运算填孔 |
 | `filter` | `mean_image / gauss_filter / median_image` | 图像平滑滤波：均值、高斯、中值去噪，作为分割前的噪声抑制预处理 |
-| `edges_subpix` | `edges_subpix` | 梯度法向二次抛物线真亚像素 XLD 轮廓提取 |
+| `rgb_to_hsv` | `trans_from_rgb (Rgb->Hsv)` | 色彩空间转换，产出 H/S/V 三通道，支撑彩色目标分析 |
+| `hsv_threshold` | `threshold (HSV 空间)` | HSV 范围彩色阈值分割，适配药丸颜色分类等彩色目标识别 |
+| `find_shape_model` | `find_shape_model` | 多目标 + 多尺度 + 多角度模板匹配，含图像金字塔与相关峰亚像素定位 |
+| `gen_contour_polygon` | `gen_polygons_xld / approx_chain` | 轮廓多边形近似，提取拐点并简化形状 |
+| `read_barcode` | `find_bar_code / find_data_code_2d` | 条码 / QR / Data Matrix 识别 (OpenCV 内置 + 可选 pyzbar) |
+| `calibrate` | `calibrate_cameras` (简化) | 棋盘格比例标定，仅输出 像素→物理尺寸 换算系数（无内参/畸变） |
+| `read_text` | `read_ocr` | OCR 文字识别 (可选 pytesseract，缺失时优雅降级) |
+| `edges_subpix` | `edges_subpix` | Canny 整像素边缘 + 法向抛物线亚像素修正 XLD 轮廓 |
 | `measure_region` | `measure_region / smallest_rectangle2` | 提取旋转外接矩形 OBB、外接圆、二阶矩主轴与凸度 |
+| `reduce_domain` | `reduce_domain` | ROI 归约：矩形/圆/多边形 ROI 外像素置零，画布尺寸不变 |
+| `measure_pos` | `measure_pos` | 一维卡尺测量：沿测量线定位亚像素边缘点与跨距 |
+| `merge_images` | `concat_obj` (分支汇聚) | 多图/分支汇聚：两路图像合并 (blend/add/max/min/absdiff/stack) |
+| `onnx_inference` | `deep_*` (深度学习) | ONNX 深度学习推理 (可选 onnxruntime，缺失时优雅降级) |

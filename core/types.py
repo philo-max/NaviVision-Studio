@@ -21,6 +21,8 @@ class RegionObject:
     circularity: float  # 圆度: 4 * pi * area / (perimeter ** 2)
     aspect_ratio: float  # 长宽比
     contours: List[List[Tuple[float, float]]] = field(default_factory=list)
+    rectangularity: float = 0.0  # 矩形度: area / (bbox_w * bbox_h)
+    hu_moments: List[float] = field(default_factory=list)  # 7 个 Hu 不变矩 (log-scaled)
 
 
 @dataclass

@@ -44,10 +44,96 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_pipeline_accepts_new_color_and_shape_operators(self):
+        response = self.client.post(
+            "/api/pipeline/update",
+            json={"steps": [
+                {"id": "read", "operator": "read_image", "params": {}},
+                {"id": "hsv", "operator": "rgb_to_hsv", "params": {}},
+                {"id": "hthr", "operator": "hsv_threshold", "params": {"h_min": 0, "h_max": 179}},
+                {"id": "poly", "operator": "gen_contour_polygon", "params": {"epsilon": 2.0}},
+                {"id": "barcode", "operator": "read_barcode", "params": {}},
+            ]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_pipeline_accepts_shape_model_and_calibrate(self):
+        response = self.client.post(
+            "/api/pipeline/update",
+            json={"steps": [
+                {"id": "read", "operator": "read_image", "params": {}},
+                {"id": "fsm", "operator": "find_shape_model", "params": {"min_score": 0.5, "scales": "1.0", "angles": "0"}},
+                {"id": "cal", "operator": "calibrate", "params": {"pattern_cols": 9, "pattern_rows": 6, "square_size": 1.0}},
+                {"id": "ocr", "operator": "read_text", "params": {"lang": "eng"}},
+            ]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    # --- P3-11 上传 / 脚本执行边界 (异常路径自动化测试) ---
+    def test_upload_rejects_empty_payload(self):
+        response = self.client.post(
+            "/api/v1/predict",
+            files=[("file", ("empty.png", b"", "image/png"))],
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_rejects_invalid_image_format(self):
+        response = self.client.post(
+            "/api/v1/predict",
+            files=[("file", ("bad.txt", b"this is definitely not an image", "text/plain"))],
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_rejects_oversized_file(self):
+        oversized = b"\x00" * (15 * 1024 * 1024 + 1024)
+        response = self.client.post(
+            "/api/v1/predict",
+            files=[("file", ("huge.png", oversized, "image/png"))],
+        )
+
+        self.assertEqual(response.status_code, 413)
+
+    def test_batch_rejects_too_many_files(self):
+        sample_path = Path("samples/pills_inspection.png")
+        files = []
+        with sample_path.open("rb") as sample:
+            payload = sample.read()
+        for i in range(26):
+            files.append(("files", (f"p{i}.png", payload, "image/png")))
+
+        response = self.client.post(
+            "/api/v1/batch-predict",
+            data={"rules": '{"min_objects": 1}'},
+            files=files,
+        )
+
+        self.assertEqual(response.status_code, 413)
+
     def test_script_runner_is_disabled_by_default(self):
         response = self.client.post("/api/script/run", json={"code": "print('test')"})
 
         self.assertEqual(response.status_code, 403)
+
+    def test_script_runner_blocks_malicious_code_when_enabled(self):
+        import app as app_module
+        original = app_module.ENABLE_SCRIPT_RUNNER
+        app_module.ENABLE_SCRIPT_RUNNER = True
+        try:
+            self.client.post("/api/pipeline/update", json={"steps": [
+                {"id": "read", "operator": "read_image", "params": {}},
+            ]})
+            response = self.client.post(
+                "/api/script/run",
+                json={"code": "import os\nos.system('dir')"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()["success"])
+        finally:
+            app_module.ENABLE_SCRIPT_RUNNER = original
 
     def test_batch_inspection_and_csv_report(self):
         sample_path = Path("samples/pills_inspection.png")

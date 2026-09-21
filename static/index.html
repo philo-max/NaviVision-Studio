@@ -46,6 +46,10 @@
         📂 打开工程
       </button>
       <input type="file" id="projectFileInput" accept=".nvproj,.json" style="display:none;">
+      <button class="btn btn-secondary" id="btnUploadHdev" title="导入本地 HDevelop (.hdev / .hdvp) 脚本">
+        🔶 导入 .hdev
+      </button>
+      <input type="file" id="hdevFileInput" accept=".hdev,.hdvp" style="display:none;">
       <input type="file" id="batchInput" accept="image/*" multiple style="display:none;">
       <button class="btn btn-primary" id="btnBatchInspect" title="按当前流水线批量检测，并导出判定报告">
         🏭 批量检测
@@ -79,6 +83,18 @@
           </button>
           <!-- 下拉算子菜单 -->
           <div id="addOpMenu" style="display:none;position:absolute;top:32px;right:0;width:180px;background:var(--bg-panel-elevated);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:var(--shadow-dropdown);z-index:100;padding:6px 0;">
+            <button class="dropdown-item" data-op="reduce_domain" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🔲</span> reduce_domain (ROI 归约)
+            </button>
+            <button class="dropdown-item" data-op="measure_pos" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>📏</span> measure_pos (1D 卡尺)
+            </button>
+            <button class="dropdown-item" data-op="merge_images" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🧬</span> merge_images (多图/分支)
+            </button>
+            <button class="dropdown-item" data-op="onnx_inference" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🧠</span> onnx_inference (深度学习)
+            </button>
             <button class="dropdown-item" data-op="threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
               <span>🎚️</span> threshold (双阈值)
             </button>
@@ -96,6 +112,27 @@
             </button>
             <button class="dropdown-item" data-op="filter" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
               <span>🧹</span> filter (平滑滤波)
+            </button>
+            <button class="dropdown-item" data-op="rgb_to_hsv" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🌈</span> rgb_to_hsv (色彩空间转换)
+            </button>
+            <button class="dropdown-item" data-op="hsv_threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🎨</span> hsv_threshold (HSV 彩色阈值)
+            </button>
+            <button class="dropdown-item" data-op="find_shape_model" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🧭</span> find_shape_model (模板匹配)
+            </button>
+            <button class="dropdown-item" data-op="gen_contour_polygon" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🔷</span> gen_contour_polygon (多边形近似)
+            </button>
+            <button class="dropdown-item" data-op="read_barcode" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🔳</span> read_barcode (条码/二维码)
+            </button>
+            <button class="dropdown-item" data-op="calibrate" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>📏</span> calibrate (相机标定)
+            </button>
+            <button class="dropdown-item" data-op="read_text" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <span>🔤</span> read_text (OCR)
             </button>
             <button class="dropdown-item" data-op="edges_subpix" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
               <span>〰️</span> edges_subpix (亚像素边缘)
@@ -120,17 +157,32 @@
     <aside class="panel-code-studio" id="panelCodeStudio" style="display:none;">
       <div class="code-studio-toolbar">
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:12px;color:var(--text-muted);">模板:</span>
+          <span style="font-size:12px;color:var(--text-muted);">语言:</span>
+          <select id="codeLangSelect" style="background:var(--bg-input);color:var(--text-main);border:1px solid var(--border-bright);padding:3px 6px;border-radius:4px;font-size:12px;outline:none;cursor:pointer;">
+            <option value="hdev" selected>🔶 HDevelop 4GL</option>
+            <option value="python">🐍 Python / OpenCV</option>
+          </select>
+          <span style="font-size:12px;color:var(--text-muted);margin-left:4px;">模板:</span>
           <select id="codeTemplateSelect" style="background:var(--bg-input);color:var(--text-main);border:1px solid var(--border-bright);padding:3px 6px;border-radius:4px;font-size:12px;outline:none;cursor:pointer;">
-            <option value="sobel">Sobel 梯度自定二值化</option>
-            <option value="contours">Canny 矢量轮廓提取</option>
-            <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
-            <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
+            <!-- 由 code_editor.js 动态填充 -->
           </select>
         </div>
-        <button class="btn btn-primary" id="btnRunScript" style="padding:4px 10px;font-size:12px;">
-          ▶ 运行 (Ctrl+Enter)
-        </button>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button class="btn btn-secondary" id="btnSyncToPipeline" title="将当前 HDevelop 代码转译为可视化流水线步骤" style="padding:4px 8px;font-size:11px;">
+            🧩 转为流水线
+          </button>
+          <button class="btn btn-primary" id="btnRunScript" style="padding:4px 10px;font-size:12px;">
+            ▶ 运行 (Ctrl+Enter)
+          </button>
+        </div>
+      </div>
+
+      <!-- HDevelop Iconic 变量视口目标选择器 -->
+      <div id="hdevVarBar" style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:var(--bg-panel-elevated);border-bottom:1px solid var(--border-subtle);font-size:11px;">
+        <span style="color:var(--text-muted);white-space:nowrap;">👁️ 视口目标:</span>
+        <div id="hdevVarPills" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+          <span style="color:var(--text-muted);font-style:italic;">运行后选择变量...</span>
+        </div>
       </div>
 
       <!-- 代码输入区与行号 -->
@@ -142,11 +194,11 @@
       <!-- 黑客沙箱终端输出 -->
       <div class="terminal-panel">
         <div class="terminal-header">
-          <span>🖥️ Python 沙箱终端控制台 (stdout/stderr)</span>
+          <span id="terminalTitle">🖥️ HDevelop 解释执行沙箱控制台</span>
           <button class="icon-btn" id="btnClearTerminal" title="清空日志" style="font-size:11px;">🗑️ 清屏</button>
         </div>
         <div class="terminal-logs" id="terminalLogs">
-          <div class="console-entry meta">[系统就绪] Python 3.12 沙箱环境加载完毕，随时按 Ctrl+Enter 运行代码...</div>
+          <div class="console-entry meta">[系统就绪] HDevelop 4GL 解释器已就绪，随时按 Ctrl+Enter 运行脚本...</div>
         </div>
       </div>
     </aside>
@@ -169,6 +221,11 @@
         <button class="icon-btn" id="btnZoomOut" title="缩小 (-)">🔍-</button>
         <button class="icon-btn" id="btnZoomFit" title="自适应窗口">⛶ 适配</button>
         <button class="icon-btn" id="btnZoom100" title="100% 原尺寸">1:1</button>
+        <div class="sep"></div>
+        <button class="icon-btn" id="btnRoiRect" title="绘制矩形 ROI">▭ 矩形</button>
+        <button class="icon-btn" id="btnRoiCircle" title="绘制圆形 ROI">◯ 圆</button>
+        <button class="icon-btn" id="btnRoiPoly" title="绘制多边形 ROI">⬠ 多边形</button>
+        <button class="icon-btn" id="btnRoiClear" title="清除 ROI">✖ 清除ROI</button>
       </div>
 
       <!-- 画布舞台 -->
@@ -248,6 +305,7 @@
       <pre class="code-editor-area" id="codeViewer"></pre>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="btnCopyCode">📋 复制代码</button>
+        <button class="btn btn-secondary" id="btnExportHdev" title="导出为标准 HDevelop (.hdev) 脚本">🔶 导出 .hdev 脚本</button>
         <button class="btn btn-primary" id="btnDownloadPy">💾 下载 .py 文件</button>
       </div>
     </div>

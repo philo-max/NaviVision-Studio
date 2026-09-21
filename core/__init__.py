@@ -9,6 +9,8 @@ from core import operators as ops
 from core.code_generator import generate_python_code
 from core.script_runner import execute_custom_script, validate_code_security
 
+from core.hdev_engine import HDevParser, HDevInterpreter, HDevTranspiler
+
 __all__ = [
     "Region",
     "RegionObject",
@@ -21,4 +23,7 @@ __all__ = [
     "generate_python_code",
     "execute_custom_script",
     "validate_code_security",
+    "HDevParser",
+    "HDevInterpreter",
+    "HDevTranspiler",
 ]

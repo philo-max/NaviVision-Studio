@@ -41,6 +41,14 @@ class StudioViewport {
     this.objects = [];
     this.highlightObjId = null;
 
+    // ROI 交互绘制状态
+    this.roiMode = null;         // null | 'rect' | 'circle' | 'polygon'
+    this.roiGeometry = null;     // 已完成的 ROI 几何描述
+    this.roiPoints = [];         // 多边形绘制过程中的顶点
+    this._roiStart = null;       // 拖拽起点 (图像坐标)
+    this._roiCurrent = null;     // 拖拽当前点 (图像坐标)
+    this.onRoiComplete = null;   // 回调: (geometry) => void
+
     // HUD 元素
     this.hudCoord = document.getElementById('hudCoord');
     this.hudPixel = document.getElementById('hudPixel');
@@ -52,11 +60,23 @@ class StudioViewport {
   initEvents() {
     // 鼠标拖拽平移
     this.stage.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { // 左键
-        this.isDragging = true;
-        this.dragStartX = e.clientX - this.offsetX;
-        this.dragStartY = e.clientY - this.offsetY;
+      if (e.button !== 0) return; // 仅左键
+      // ROI 绘制模式: 拦截左键, 不触发平移
+      if (this.roiMode) {
+        const p = this._stageToImage(e);
+        if (this.roiMode === 'polygon') {
+          this.roiPoints.push([p.x, p.y]);
+          this.redrawContours();
+          this._vertexModeArmed = true;
+        } else {
+          this._roiStart = p;
+          this._roiCurrent = p;
+        }
+        return;
       }
+      this.isDragging = true;
+      this.dragStartX = e.clientX - this.offsetX;
+      this.dragStartY = e.clientY - this.offsetY;
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -65,11 +85,18 @@ class StudioViewport {
         this.offsetY = e.clientY - this.dragStartY;
         this.applyTransform();
       }
+      if (this.roiMode && (this.roiMode === 'rect' || this.roiMode === 'circle') && this._roiStart) {
+        this._roiCurrent = this._stageToImage(e);
+        this.redrawContours();
+      }
       this.updateCursorHUD(e);
     });
 
     window.addEventListener('mouseup', () => {
       this.isDragging = false;
+      if (this.roiMode && this.roiMode !== 'polygon' && this._roiStart && this._roiCurrent) {
+        this._finalizeRoiDrag();
+      }
     });
 
     // 滚轮缩放 (以鼠标指针为中心缩放)
@@ -212,6 +239,7 @@ class StudioViewport {
 
   redrawContours() {
     this.ctxVec.clearRect(0, 0, this.imgWidth, this.imgHeight);
+    this._drawRoiOverlay();
     if (!this.showContours || !this.contours || this.contours.length === 0) return;
 
     this.ctxVec.lineWidth = 1.5;
@@ -266,5 +294,110 @@ class StudioViewport {
   highlightObject(id) {
     this.highlightObjId = id;
     this.redrawMask();
+  }
+
+  // ---------------- ROI 交互 ----------------
+  _stageToImage(e) {
+    const rect = this.stage.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) - this.offsetX) / this.scale;
+    const y = ((e.clientY - rect.top) - this.offsetY) / this.scale;
+    return { x: Math.max(0, Math.min(this.imgWidth, x)), y: Math.max(0, Math.min(this.imgHeight, y)) };
+  }
+
+  setRoiMode(mode) {
+    this.roiMode = (this.roiMode === mode) ? null : mode;
+    this.roiPoints = [];
+    this._roiStart = null;
+    this._roiCurrent = null;
+    this.stage.style.cursor = this.roiMode ? 'crosshair' : 'grab';
+    this.redrawContours();
+    return this.roiMode;
+  }
+
+  clearRoi() {
+    this.roiGeometry = null;
+    this.roiPoints = [];
+    this._roiStart = null;
+    this._roiCurrent = null;
+    this.redrawContours();
+    if (this.onRoiComplete) this.onRoiComplete(null);
+  }
+
+  _finalizeRoiDrag() {
+    const a = this._roiStart, b = this._roiCurrent;
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+    const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+    if (this.roiMode === 'circle') {
+      const r = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+      this.roiGeometry = { type: 'circle', cx: Math.round(a.x), cy: Math.round(a.y), r: Math.round(r) };
+    } else if (w >= 2 && h >= 2) {
+      this.roiGeometry = { type: 'rect', x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+    } else {
+      this.roiGeometry = null;
+    }
+    this.roiMode = null;
+    this._roiStart = null;
+    this._roiCurrent = null;
+    this.stage.style.cursor = 'grab';
+    this.redrawContours();
+    if (this.roiGeometry && this.onRoiComplete) this.onRoiComplete(this.roiGeometry);
+  }
+
+  finishPolygon() {
+    if (this.roiPoints.length >= 3) {
+      this.roiGeometry = { type: 'polygon', points: this.roiPoints.map(pt => [Math.round(pt[0]), Math.round(pt[1])]) };
+      if (this.onRoiComplete) this.onRoiComplete(this.roiGeometry);
+    }
+    this.roiMode = null;
+    this.roiPoints = [];
+    this.stage.style.cursor = 'grab';
+    this.redrawContours();
+  }
+
+  _drawRoiOverlay() {
+    const ctx = this.ctxVec;
+    ctx.save();
+    ctx.lineWidth = 1.5 / this.scale;
+    ctx.strokeStyle = '#ff2fd0';
+    ctx.setLineDash([6 / this.scale, 4 / this.scale]);
+
+    const drawGeom = (g) => {
+      if (!g) return;
+      ctx.beginPath();
+      if (g.type === 'rect') {
+        ctx.rect(g.x, g.y, g.w, g.h);
+      } else if (g.type === 'circle') {
+        ctx.arc(g.cx, g.cy, g.r, 0, Math.PI * 2);
+      } else if (g.type === 'polygon' && g.points) {
+        g.points.forEach((pt, i) => { if (i === 0) ctx.moveTo(pt[0], pt[1]); else ctx.lineTo(pt[0], pt[1]); });
+        ctx.closePath();
+      }
+      ctx.stroke();
+    };
+
+    if (this.roiGeometry) drawGeom(this.roiGeometry);
+
+    if (this._roiStart && this._roiCurrent) {
+      const a = this._roiStart, b = this._roiCurrent;
+      if (this.roiMode === 'circle') {
+        const r = Math.hypot(b.x - a.x, b.y - a.y);
+        ctx.beginPath(); ctx.arc(a.x, a.y, r, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.rect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+        ctx.stroke();
+      }
+    }
+
+    if (this.roiMode === 'polygon' && this.roiPoints.length) {
+      ctx.beginPath();
+      this.roiPoints.forEach((pt, i) => { if (i === 0) ctx.moveTo(pt[0], pt[1]); else ctx.lineTo(pt[0], pt[1]); });
+      ctx.stroke();
+      ctx.setLineDash([]);
+      this.roiPoints.forEach(pt => {
+        ctx.beginPath(); ctx.arc(pt[0], pt[1], 3 / this.scale, 0, Math.PI * 2); ctx.fillStyle = '#ff2fd0'; ctx.fill();
+      });
+    }
+    ctx.restore();
   }
 }

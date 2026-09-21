@@ -6,13 +6,14 @@ NaviVision Studio (OpenDevelop) - Vision Operators Library
 - connection (连通域打散, 支持 4/8 连通)
 - select_shape (面积、圆度、长宽比、紧致度筛选)
 - morphology (dilation, erosion, opening, closing)
-- edges_subpix (Canny + 亚像素精确轮廓 XLD)
+- edges_subpix (Canny 整像素边缘 + 法向抛物线亚像素插值 XLD)
 - measure_region (统计中心、外接矩形、拟合圆)
 """
 
 import cv2
 import numpy as np
 import math
+import os
 from typing import List, Tuple, Dict, Any, Optional
 from core.types import Region, RegionObject, XLDContour
 
@@ -132,7 +133,19 @@ def connection(region: Region, connectivity: int = 8) -> Region:
             circularity = 0.0
             
         aspect_ratio = float(w / max(1, h))
-        
+
+        # 矩形度 Rectangularity = Area / (bbox_w * bbox_h)
+        rectangularity = float(area / max(1, w * h))
+        rectangularity = min(1.0, max(0.0, rectangularity))
+
+        # Hu 不变矩 (7 维): 基于图像矩, 取 log 尺度压缩数量级
+        try:
+            mm = cv2.moments(obj_mask, binaryImage=True)
+            hu = cv2.HuMoments(mm).flatten()
+            hu_moments = [float(-np.sign(v) * math.log10(abs(v) + 1e-30)) for v in hu]
+        except Exception:
+            hu_moments = []
+
         obj = RegionObject(
             id=i,
             area=area,
@@ -140,7 +153,9 @@ def connection(region: Region, connectivity: int = 8) -> Region:
             bbox=(y, x, y + h, x + w),
             circularity=circularity,
             aspect_ratio=aspect_ratio,
-            contours=[contour_points] if contour_points else []
+            contours=[contour_points] if contour_points else [],
+            rectangularity=rectangularity,
+            hu_moments=hu_moments,
         )
         objects.append(obj)
         
@@ -154,11 +169,17 @@ def select_shape(
     min_circularity: float = 0.0,
     max_circularity: float = 1.0,
     min_aspect: float = 0.0,
-    max_aspect: float = 100.0
+    max_aspect: float = 100.0,
+    min_rectangularity: float = 0.0,
+    max_rectangularity: float = 1.0,
+    hu_match: Optional[List[float]] = None,
+    max_hu_distance: float = 1.0
 ) -> Region:
     """
     HALCON select_shape 算子:
-    根据特征过滤连通域
+    根据特征过滤连通域。新增判据:
+    - rectangularity (矩形度): area / bbox 面积, 用于区分矩形/非矩形目标
+    - Hu 不变矩: 若给定 hu_match (7 维参考向量), 按欧氏距离阈值选择性保留
     """
     # 如果尚未执行打散，先自动执行 connection
     reg = region if region.is_connected else connection(region, connectivity=8)
@@ -173,6 +194,14 @@ def select_shape(
             continue
         if not (min_aspect <= obj.aspect_ratio <= max_aspect):
             continue
+        if not (min_rectangularity <= obj.rectangularity <= max_rectangularity):
+            continue
+        if hu_match is not None and len(hu_match) == 7:
+            if len(obj.hu_moments) != 7:
+                continue
+            dist = float(np.linalg.norm(np.asarray(obj.hu_moments) - np.asarray(hu_match, dtype=float)))
+            if dist > float(max_hu_distance):
+                continue
             
         filtered_objects.append(obj)
         # 将符合条件的物体绘制到新 mask
@@ -285,9 +314,12 @@ def edges_subpix(
     high_thresh: float = 90.0
 ) -> List[XLDContour]:
     """
-    HALCON edges_subpix 算子 (工业级真·亚像素边缘提取):
-    使用 Canny 联合 Sobel 梯度法向二次抛物线三点插值 (Steger / Facet 思想)，
-    提取连续亚像素浮点坐标 XLD 轮廓
+    edges_subpix 平替 (整像素边缘 + 法向亚像素修正):
+    先用 Canny 提取整像素边缘轮廓, 再沿边缘法向对梯度幅值做三点抛物线插值,
+    得到浮点坐标的亚像素轮廓 XLD。
+    说明: 与 HALCON 基于 Steger-Hessian 脊线检测的真亚像素边缘不同,
+    本实现是对整像素边缘的法向插值修正, 精度受整像素边缘质量限制,
+    并非其文档早期所称的'工业级真·亚像素'。
     """
     if len(gray_img.shape) == 3:
         gray_img = cv2.cvtColor(gray_img, cv2.COLOR_BGR2GRAY)
@@ -466,3 +498,645 @@ def measure_region(region: Region) -> Dict[str, Any]:
         }
     }
 
+
+
+# ============================================================================
+# P0-2 色彩空间扩展: rgb_to_hsv / hsv_threshold (彩色目标 HSV 范围筛选)
+# ============================================================================
+def rgb_to_hsv(img: np.ndarray) -> np.ndarray:
+    """
+    HALCON trans_from_rgb 平替: BGR/RGB -> HSV 色彩空间转换。
+    返回 H(0-179) / S(0-255) / V(0-255) 三通道 uint8 图像。
+    """
+    if img is None:
+        raise ValueError("色彩空间转换输入图像为空")
+    if img.ndim == 2:
+        bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    else:
+        bgr = img
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+
+
+def hsv_threshold(
+    hsv_img: np.ndarray,
+    h_min: int = 0, h_max: int = 179,
+    s_min: int = 0, s_max: int = 255,
+    v_min: int = 0, v_max: int = 255
+) -> Region:
+    """
+    HALCON 彩色阈值分割平替: 在 HSV 空间按色相/饱和度/明度范围筛选目标。
+    适合彩色目标识别 (如药丸颜色分类 / 彩色缺陷分割)。
+    """
+    if hsv_img is None:
+        raise ValueError("HSV 阈值输入图像为空")
+    if hsv_img.ndim != 3 or hsv_img.shape[2] != 3:
+        raise ValueError("hsv_threshold 需要三通道 HSV 图像, 请先执行 rgb_to_hsv")
+
+    lower = np.array([int(h_min), int(s_min), int(v_min)], dtype=np.uint8)
+    upper = np.array([int(h_max), int(s_max), int(v_max)], dtype=np.uint8)
+    mask = cv2.inRange(hsv_img, lower, upper)
+    return Region(mask=mask, is_connected=False)
+
+
+# ============================================================================
+# P1-4 模板匹配: find_shape_model (多尺度 / 多角度金字塔搜索)
+# ============================================================================
+# P1-4 模板匹配: find_shape_model
+# 基于归一化互相关 (NCC) 的多目标 / 多尺度 / 多角度灰度模板匹配。
+#   定位策略: 图像金字塔由粗到精搜索加速 + 相关峰曲面二次插值亚像素定位。
+#   能力边界 (避免夸大): 本实现工作在灰度 NCC 层面, 并非 HALCON 基于形状
+#   (边缘方向) 的匹配, 不具备 HALCON 的全角度测量、跨尺度不变特征与
+#   亚像素边缘一致性评分的全部能力; 对光照/对比度变化有一定鲁棒性。
+# ============================================================================
+def _rotate_bound_template(tmpl: np.ndarray, angle: float) -> np.ndarray:
+    """旋转模板并裁剪回非零最小外接矩形 (border=0 填充)。"""
+    h, w = tmpl.shape[:2]
+    diag = int(math.ceil(math.sqrt(h * h + w * w)))
+    canvas = np.zeros((diag, diag), dtype=tmpl.dtype)
+    oy, ox = (diag - h) // 2, (diag - w) // 2
+    canvas[oy:oy + h, ox:ox + w] = tmpl
+    m = cv2.getRotationMatrix2D((diag / 2.0, diag / 2.0), float(angle), 1.0)
+    rotated = cv2.warpAffine(canvas, m, (diag, diag), flags=cv2.INTER_LINEAR, borderValue=0)
+    ys, xs = np.where(np.abs(rotated.astype(np.int32)) > 0)
+    if len(xs) == 0:
+        return rotated
+    return rotated[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+
+
+def _build_pyramid(img: np.ndarray, max_levels: int, min_side: int) -> List[np.ndarray]:
+    """构建高斯图像金字塔 (pyrDown), 直到最小边小于 min_side 或达到层数。"""
+    pyr = [img]
+    for _ in range(max(0, int(max_levels) - 1)):
+        if min(pyr[-1].shape[:2]) <= int(min_side):
+            break
+        pyr.append(cv2.pyrDown(pyr[-1]))
+    return pyr
+
+
+def _extract_peaks(corr: np.ndarray, threshold: float, max_peaks: int,
+                   min_dist: float) -> List[Tuple[int, int, float]]:
+    """从相关度响应图中提取多个非极大值抑制峰值。返回 [(x, y, score)]。"""
+    peaks: List[Tuple[int, int, float]] = []
+    work = np.array(corr, dtype=np.float32, copy=True)
+    md = max(1, int(round(min_dist)))
+    for _ in range(max(1, int(max_peaks))):
+        _, max_val, _, max_loc = cv2.minMaxLoc(work)
+        if max_val < float(threshold):
+            break
+        x, y = int(max_loc[0]), int(max_loc[1])
+        peaks.append((x, y, float(max_val)))
+        x0, y0 = max(0, x - md), max(0, y - md)
+        x1, y1 = min(work.shape[1], x + md + 1), min(work.shape[0], y + md + 1)
+        work[y0:y1, x0:x1] = -1.0
+    return peaks
+
+
+def _subpixel_peak(corr: np.ndarray, x: int, y: int) -> Tuple[float, float]:
+    """对相关峰做 3x3 二次曲面拟合, 返回亚像素偏移 (dx, dy)。"""
+    h, w = corr.shape
+    if x <= 0 or y <= 0 or x >= w - 1 or y >= h - 1:
+        return 0.0, 0.0
+    c = corr[y - 1:y + 2, x - 1:x + 2].astype(np.float64)
+    denom_x = 2.0 * (c[1, 0] - 2.0 * c[1, 1] + c[1, 2])
+    denom_y = 2.0 * (c[0, 1] - 2.0 * c[1, 1] + c[2, 1])
+    dx = (c[1, 0] - c[1, 2]) / denom_x if abs(denom_x) > 1e-9 else 0.0
+    dy = (c[0, 1] - c[2, 1]) / denom_y if abs(denom_y) > 1e-9 else 0.0
+    return float(max(-0.5, min(0.5, dx))), float(max(-0.5, min(0.5, dy)))
+
+
+def _match_one_variant(v_img: np.ndarray, rot: np.ndarray, min_score: float,
+                       max_matches: int, nms_distance: float,
+                       subpixel: bool, pyramid_levels: int) -> List[Tuple[int, int, float, float, float]]:
+    """对单个 (尺度, 角度) 变体做由粗到精的多目标匹配。
+
+    返回 [(top_left_x, top_left_y, score, dx, dy)] (dx/dy 为亚像素修正)。
+    """
+    if rot.shape[0] >= v_img.shape[0] or rot.shape[1] >= v_img.shape[1]:
+        return []
+    corr_full = cv2.matchTemplate(v_img, rot, cv2.TM_CCOEFF_NORMED)
+
+    pyr = _build_pyramid(v_img, pyramid_levels, 32)
+    L = len(pyr) - 1
+    cands: List[Tuple[int, int]] = []
+    if L >= 1:
+        factor = 2 ** L
+        it = pyr[L]
+        t = cv2.resize(rot, (max(8, int(round(rot.shape[1] / factor))),
+                             max(8, int(round(rot.shape[0] / factor)))),
+                       interpolation=cv2.INTER_AREA)
+        if t.shape[0] < it.shape[0] and t.shape[1] < it.shape[1]:
+            corr_c = cv2.matchTemplate(it, t, cv2.TM_CCOEFF_NORMED)
+            coarse_peaks = _extract_peaks(corr_c, float(min_score) * 0.5,
+                                          max(max_matches * 6, 12),
+                                          max(1, int(round(nms_distance / factor))))
+            cands = [(int(round(x * factor)), int(round(y * factor))) for (x, y, _) in coarse_peaks]
+
+    results: List[Tuple[int, int, float, float, float]] = []
+    if cands:
+        half = 2 ** (L + 1) + 4
+        for (cx, cy) in cands:
+            x0 = max(0, cx - half); y0 = max(0, cy - half)
+            x1 = min(corr_full.shape[1], cx + rot.shape[1] + half)
+            y1 = min(corr_full.shape[0], cy + rot.shape[0] + half)
+            if x1 - x0 < 1 or y1 - y0 < 1:
+                continue
+            sub = corr_full[y0:y1, x0:x1]
+            for (sx, sy, sv) in _extract_peaks(sub, float(min_score), 4, 1):
+                gx, gy = x0 + sx, y0 + sy
+                dx, dy = _subpixel_peak(corr_full, gx, gy) if subpixel else (0.0, 0.0)
+                results.append((gx, gy, sv, dx, dy))
+
+    if not results:
+        # 兜底: 直接在整幅相关图上做多峰提取 (保证不漏检)
+        for (gx, gy, sv) in _extract_peaks(corr_full, float(min_score), max_matches, nms_distance):
+            dx, dy = _subpixel_peak(corr_full, gx, gy) if subpixel else (0.0, 0.0)
+            results.append((gx, gy, sv, dx, dy))
+
+    # 同一变体内去重 (距离过近)
+    results.sort(key=lambda r: -r[2])
+    dedup: List[Tuple[int, int, float, float, float]] = []
+    for r in results:
+        if all((r[0] - d[0]) ** 2 + (r[1] - d[1]) ** 2 > float(nms_distance) ** 2 for d in dedup):
+            dedup.append(r)
+    return dedup
+
+
+def find_shape_model(
+    image: np.ndarray,
+    template: np.ndarray,
+    min_score: float = 0.5,
+    scales: Optional[List[float]] = None,
+    angles: Optional[List[float]] = None,
+    max_matches: int = 10,
+    nms_distance: float = 10.0,
+    pyramid_levels: int = 3,
+    subpixel: bool = True,
+    polarity_invariant: bool = False,
+    angle_step: float = 10.0,
+) -> List[Dict[str, Any]]:
+    """
+    多目标 / 多尺度 / 多角度灰度模板匹配。
+
+    与早期单峰实现的关键差异:
+      1. 单张图内可返回多个目标: 对每个 (尺度, 角度) 变体提取多个相关峰,
+         再做跨尺度/角度统一非极大值抑制, 而非只取全局最高峰。
+      2. 由粗到精的图像金字塔加速 (pyrDown 候选 + 全分辨率局部精化)。
+      3. 相关峰二次曲面插值, 给出亚像素级中心位置 (subpixel=True)。
+      4. 极性无关匹配 (polarity_invariant=True): 同时匹配亮目标与暗目标。
+      5. angles 缺省时按 angle_step 自动覆盖 0~360°, 不再默认只搜 0°。
+
+    参数:
+      pyramid_levels: 金字塔层数 (>=1)。
+      subpixel: 是否启用相关峰亚像素插值。
+      polarity_invariant: 是否兼容黑白极性反转。
+      angle_step: angles 未显式给出时, 自动角度序列的步长 (度)。
+    """
+    if image is None or template is None:
+        raise ValueError("模板匹配输入为空")
+
+    img = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    tmpl0 = template if template.ndim == 2 else cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+    img = np.ascontiguousarray(img, dtype=np.uint8)
+    tmpl0 = np.ascontiguousarray(tmpl0, dtype=np.uint8)
+
+    scale_list = [float(s) for s in scales] if scales else [1.0]
+    if angles:
+        angle_list = [float(a) for a in angles]
+    else:
+        step = float(angle_step) if angle_step and float(angle_step) > 0 else 10.0
+        angle_list = [float(a) for a in np.arange(0.0, 360.0, step)]
+
+    variants = [("normal", img, tmpl0)]
+    if polarity_invariant:
+        # 极性无关: 保持原图不变, 额外使用反相模板以命中"暗目标/亮背景"的情形
+        variants.append(("inverted", img, cv2.bitwise_not(tmpl0)))
+
+    raw_matches: List[Dict[str, Any]] = []
+    for pol_name, v_img, v_tmpl in variants:
+        for s in scale_list:
+            tw = max(1, int(round(v_tmpl.shape[1] * s)))
+            th = max(1, int(round(v_tmpl.shape[0] * s)))
+            if tw >= v_img.shape[1] or th >= v_img.shape[0]:
+                continue
+            base = cv2.resize(v_tmpl, (tw, th), interpolation=cv2.INTER_LINEAR)
+            for a in angle_list:
+                rot = _rotate_bound_template(base, a)
+                if rot.shape[0] >= v_img.shape[0] or rot.shape[1] >= v_img.shape[1]:
+                    continue
+                found = _match_one_variant(v_img, rot, float(min_score),
+                                           int(max_matches), float(nms_distance),
+                                           bool(subpixel), int(pyramid_levels))
+                for (gx, gy, sv, dx, dy) in found:
+                    raw_matches.append({
+                        "score": round(float(sv), 4),
+                        "center": [round(float(gx) + dx + rot.shape[1] / 2.0, 3),
+                                   round(float(gy) + dy + rot.shape[0] / 2.0, 3)],
+                        "angle": float(a),
+                        "scale": float(s),
+                        "polarity": pol_name,
+                        "template_size": [int(rot.shape[1]), int(rot.shape[0])],
+                        "top_left": [int(gx), int(gy)],
+                        "top_left_subpixel": [round(float(gx) + dx, 3), round(float(gy) + dy, 3)],
+                    })
+
+    # 跨尺度 / 跨角度 / 跨极性统一 NMS
+    raw_matches.sort(key=lambda m: -m["score"])
+    kept: List[Dict[str, Any]] = []
+    for m in raw_matches:
+        if all((m["center"][0] - k["center"][0]) ** 2 + (m["center"][1] - k["center"][1]) ** 2
+               > float(nms_distance) ** 2 for k in kept):
+            kept.append(m)
+        if len(kept) >= int(max_matches):
+            break
+    return kept
+
+def gen_contour_polygon(region_or_contour: Any, epsilon: float = 2.0) -> List[Dict[str, Any]]:
+    """
+    HALCON gen_polygons_xld / approx_chain 平替: 对轮廓做多边形近似, 输出顶点
+    (拐点) 序列, 用于形状简化与拐点提取。
+    """
+    if isinstance(region_or_contour, Region):
+        contours, _ = cv2.findContours(region_or_contour.mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    else:
+        arr = np.asarray(region_or_contour, dtype=np.int32)
+        contours = [arr.reshape(-1, 1, 2)]
+
+    polygons: List[Dict[str, Any]] = []
+    for idx, cnt in enumerate(contours):
+        if cnt is None or len(cnt) < 3:
+            continue
+        approx = cv2.approxPolyDP(cnt, float(epsilon), True)
+        pts = [[int(p[0][0]), int(p[0][1])] for p in approx]
+        polygons.append({
+            "contour_id": idx,
+            "corner_count": len(pts),
+            "is_closed": True,
+            "corner_points": pts
+        })
+    return polygons
+
+
+# ============================================================================
+# P2-7 条码 / 二维码识别: read_barcode (OpenCV 内置 + 可选 pyzbar)
+# ============================================================================
+def read_barcode(img: np.ndarray) -> List[Dict[str, Any]]:
+    """
+    HALCON find_bar_code / find_data_code_2d 平替:
+    - 使用 OpenCV 内置 QRCodeDetector 识别 QR 码 (无额外依赖)
+    - 若安装了 pyzbar, 额外支持一维条码 / Data Matrix 等
+    """
+    if img is None:
+        raise ValueError("条码识别输入为空")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+
+    results: List[Dict[str, Any]] = []
+
+    try:
+        qr = cv2.QRCodeDetector()
+        data, points, _ = qr.detectAndDecode(gray)
+        if data:
+            pts = points.reshape(-1, 2).tolist() if points is not None else []
+            results.append({"type": "QRCODE", "data": data,
+                            "points": [[round(float(x), 2), round(float(y), 2)] for x, y in pts]})
+    except Exception:
+        pass
+
+    try:
+        from pyzbar import pyzbar  # type: ignore
+        for sym in pyzbar.decode(gray):
+            try:
+                payload = sym.data.decode("utf-8")
+            except Exception:
+                payload = sym.data.decode("latin-1", errors="replace")
+            results.append({
+                "type": str(sym.type),
+                "data": payload,
+                "points": [[int(p.x), int(p.y)] for p in sym.polygon]
+            })
+    except Exception:
+        pass
+
+    return results
+
+
+# ============================================================================
+# P2-8 相机标定: 棋盘格像素->物理尺寸换算
+# ============================================================================
+def estimate_scale_from_checkerboard(
+    img: np.ndarray,
+    pattern_cols: int = 9,
+    pattern_rows: int = 6,
+    square_size: float = 1.0
+) -> Dict[str, Any]:
+    """
+    棋盘格比例标定: 通过棋盘格角点估计单一 像素/物理单位 换算系数。
+    说明: 仅输出一个平面比例系数, 不求解相机内参、畸变系数与透视校正,
+    不能替代 HALCON 完整标定 (calibrate_cameras) 的测量级标定能力。
+    返回 {found, pixels_per_unit, avg_square_pixels, corners}。
+    """
+    if img is None:
+        raise ValueError("标定输入图像为空")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    pattern = (int(pattern_cols), int(pattern_rows))
+    flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+
+    found, corners = cv2.findChessboardCorners(gray, pattern, flags)
+    if not found or corners is None:
+        return {"found": False, "pixels_per_unit": None}
+
+    corners = cv2.cornerSubPix(
+        gray, corners, (5, 5), (-1, -1),
+        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    )
+    pts = corners.reshape(-1, 2)
+    cols = pattern[0]
+    dists: List[float] = []
+    for r in range(pattern[1]):
+        row_pts = pts[r * cols:(r + 1) * cols]
+        for c in range(cols - 1):
+            dists.append(float(np.linalg.norm(row_pts[c + 1] - row_pts[c])))
+    if not dists:
+        return {"found": False, "pixels_per_unit": None}
+
+    avg_square_pixels = sum(dists) / len(dists)
+    ppu = avg_square_pixels / float(square_size) if float(square_size) > 0 else avg_square_pixels
+    return {
+        "found": True,
+        "pixels_per_unit": round(ppu, 4),
+        "avg_square_pixels": round(avg_square_pixels, 3),
+        "corners": [[round(float(p[0]), 2), round(float(p[1]), 2)] for p in pts]
+    }
+
+
+# ============================================================================
+# P2-9 OCR: read_text (可选依赖 pytesseract, 缺失时优雅降级)
+# ============================================================================
+def read_text(img: np.ndarray, lang: str = "eng") -> str:
+    """
+    HALCON read_ocr 平替: 调用 Tesseract OCR 识别图像文字。
+    属可选能力, 未安装 pytesseract / 系统 Tesseract 时抛出明确异常。
+    """
+    try:
+        import pytesseract  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(
+            "OCR 需要可选依赖 pytesseract (及系统 Tesseract OCR 引擎), 当前环境未安装, 已优雅降级。"
+        ) from exc
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    return str(pytesseract.image_to_string(gray, lang=lang)).strip()
+
+# ============================================================================
+# ROI 交互算子: 由几何形状生成区域 + 在区域内归约图像 (reduce_domain)
+# 支持矩形 / 圆 / 多边形三种交互绘制的 ROI 形状, 与 HALCON reduce_domain 语义一致:
+# 区域外像素被置为填充值, 但画布尺寸保持不变, 从而不破坏下游坐标体系。
+# ============================================================================
+def create_mask_from_geometry(shape: Tuple[int, int], geometry: Optional[Dict[str, Any]]) -> Region:
+    """由几何描述生成 ROI 掩膜区域 (矩形 / 圆 / 多边形)。
+
+    geometry 支持的形态:
+      {"type": "rect",    "x": .., "y": .., "w": .., "h": ..}
+      {"type": "circle",  "cx": .., "cy": .., "r": ..}
+      {"type": "polygon", "points": [[x, y], [x, y], ...]}
+    缺省或非法时返回整幅全通区域 (全 1)。
+    """
+    h, w = int(shape[0]), int(shape[1])
+    mask = np.zeros((h, w), dtype=np.uint8)
+    if not geometry or not isinstance(geometry, dict):
+        mask[:] = 255
+        return Region(mask=mask, is_connected=False)
+
+    gtype = str(geometry.get("type", "rect")).lower()
+    try:
+        if gtype == "rect":
+            x = int(geometry.get("x", 0)); y = int(geometry.get("y", 0))
+            rw = int(geometry.get("w", w)); rh = int(geometry.get("h", h))
+            x0 = max(0, min(w - 1, x)); y0 = max(0, min(h - 1, y))
+            x1 = max(0, min(w, x + rw)); y1 = max(0, min(h, y + rh))
+            mask[y0:y1, x0:x1] = 255
+        elif gtype == "circle":
+            cx = int(geometry.get("cx", w // 2)); cy = int(geometry.get("cy", h // 2))
+            r = max(1, int(geometry.get("r", min(h, w) // 4)))
+            cv2.circle(mask, (cx, cy), r, 255, -1)
+        elif gtype == "polygon":
+            pts = geometry.get("points") or []
+            arr = np.asarray(pts, dtype=np.int32)
+            if arr.ndim == 2 and arr.shape[0] >= 3:
+                cv2.fillPoly(mask, [arr], 255)
+            else:
+                mask[:] = 255
+        else:
+            mask[:] = 255
+    except Exception:
+        mask[:] = 255
+    return Region(mask=mask, is_connected=False)
+
+
+def reduce_domain(img: np.ndarray, region: Region, fill_value: int = 0) -> np.ndarray:
+    """ROI 归约: 保留 region 内像素, 区域外置为 fill_value (画布尺寸不变)。"""
+    if img is None:
+        raise ValueError("reduce_domain 输入图像为空")
+    if region is None or region.mask is None:
+        return img.copy()
+    mask = region.mask
+    if mask.shape[:2] != img.shape[:2]:
+        mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+    m = (mask > 0)
+    out = img.copy()
+    if img.ndim == 3:
+        out[~m] = fill_value
+    else:
+        out[~m] = fill_value
+    return out
+
+
+# ============================================================================
+# 一维卡尺测量: measure_pos
+# 沿给定测量线 (x0,y0)->(x1,y1) 采样灰度剖面, 用一维导数 + 抛物线插值定位
+# 亚像素边缘点。这是 HALCON 1D 卡尺测量的简化等价物, 用于尺寸/间距测量。
+# ============================================================================
+def measure_pos(
+    img: np.ndarray,
+    x0: float, y0: float, x1: float, y1: float,
+    sigma: float = 1.0,
+    threshold: float = 20.0,
+    select: str = "all"
+) -> List[Dict[str, Any]]:
+    """沿测量线做 1D 卡尺测量, 返回亚像素边缘位置。
+
+    参数:
+      sigma: 剖面前的高斯平滑标准差。
+      threshold: 一阶导数(边缘强度)阈值, 低于该值不判定为边缘。
+      select: "all" | "first" | "last" 返回全部或首/末边缘。
+    返回: [{"position": s(沿线的曲线距离), "x": .., "y": .., "amplitude": .., "index": ..}]
+    """
+    if img is None:
+        raise ValueError("measure_pos 输入图像为空")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    gray = gray.astype(np.float32)
+
+    dx = float(x1) - float(x0)
+    dy = float(y1) - float(y0)
+    length = math.hypot(dx, dy)
+    if length < 1.0:
+        return []
+    n = max(2, int(math.ceil(length)))
+    ts = np.linspace(0.0, 1.0, n)
+    xs = float(x0) + ts * dx
+    ys = float(y0) + ts * dy
+
+    # 双线性采样剖面
+    prof = np.array([_sample_bilinear(gray, px, py) for px, py in zip(xs, ys)], dtype=np.float32)
+    if sigma and float(sigma) > 0:
+        k = max(1, int(round(float(sigma) * 3)))
+        prof = cv2.GaussianBlur(prof.reshape(1, -1), (1, 2 * k + 1), float(sigma)).reshape(-1)
+
+    der = np.gradient(prof)
+    abs_der = np.abs(der)
+    step = length / float(n - 1)
+
+    edges: List[Dict[str, Any]] = []
+    for i in range(1, n - 1):
+        if abs_der[i] < float(threshold):
+            continue
+        # 局部极大 (|导数| 峰)
+        if abs_der[i] < abs_der[i - 1] or abs_der[i] < abs_der[i + 1]:
+            continue
+        denom = (abs_der[i - 1] - 2.0 * abs_der[i] + abs_der[i + 1])
+        delta = (abs_der[i - 1] - abs_der[i + 1]) / (2.0 * denom) if abs(denom) > 1e-9 else 0.0
+        delta = float(max(-0.5, min(0.5, delta)))
+        idx = i + delta
+        t = idx / float(n - 1)
+        edges.append({
+            "position": round(float(t) * length, 3),
+            "x": round(float(x0) + t * dx, 3),
+            "y": round(float(y0) + t * dy, 3),
+            "amplitude": round(float(abs_der[i]), 3),
+            "index": int(i),
+        })
+
+    sel = str(select or "all").lower()
+    if sel == "first" and edges:
+        return edges[:1]
+    if sel == "last" and edges:
+        return edges[-1:]
+    return edges
+
+
+# ============================================================================
+# 图像合并: merge_images (多图 / 分支汇聚节点)
+# ============================================================================
+def merge_images(img_a: np.ndarray, img_b: np.ndarray, mode: str = "blend",
+                 alpha: float = 0.5) -> np.ndarray:
+    """把两路图像合并为一路 (用于流水线多图/分支汇聚)。
+
+    mode: blend(加权) | add | max | min | absdiff | stack_h | stack_v
+    """
+    if img_a is None or img_b is None:
+        raise ValueError("merge_images 需要两路输入图像")
+    bb = img_b
+    if bb.shape[:2] != img_a.shape[:2]:
+        bb = cv2.resize(bb, (img_a.shape[1], img_a.shape[0]), interpolation=cv2.INTER_LINEAR)
+    a = img_a.astype(np.float32)
+    b = bb.astype(np.float32)
+    m = str(mode or "blend").lower()
+    if m == "add":
+        out = np.clip(a + b, 0, 255)
+    elif m == "max":
+        out = np.maximum(a, b)
+    elif m == "min":
+        out = np.minimum(a, b)
+    elif m == "absdiff":
+        out = np.abs(a - b)
+    elif m == "stack_h":
+        out = np.hstack([a, b])
+    elif m == "stack_v":
+        out = np.vstack([a, b])
+    else:  # blend
+        al = float(max(0.0, min(1.0, alpha)))
+        out = np.clip(a * al + b * (1.0 - al), 0, 255)
+    return out.astype(np.uint8)
+
+
+# ============================================================================
+# P3-1 深度学习推理节点: onnx_inference (可选依赖 onnxruntime, 缺失时优雅降级)
+# 支持分类 (classification) 与通用回归/嵌入输出的最小封装。
+# ============================================================================
+def onnx_inference(
+    img: np.ndarray,
+    model_path: str,
+    input_size: Optional[List[int]] = None,
+    mean: Optional[List[float]] = None,
+    std: Optional[List[float]] = None,
+    task: str = "classification",
+    top_k: int = 5
+) -> Dict[str, Any]:
+    """通过 ONNX Runtime 运行一个已训练模型 (分类 / 通用)。
+
+    设计为可选能力: 未安装 onnxruntime 或模型文件不存在时抛出明确异常,
+    流水线捕获后可优雅降级为占位说明, 不会导致整条流水线崩溃。
+    """
+    try:
+        import onnxruntime as ort  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(
+            "ONNX 推理需要可选依赖 onnxruntime, 当前环境未安装, 已优雅降级。"
+        ) from exc
+    if not model_path or not os.path.exists(model_path):
+        raise ValueError(f"ONNX 模型文件不存在: {model_path}")
+    if img is None:
+        raise ValueError("onnx_inference 输入图像为空")
+
+    sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+    inp = sess.get_inputs()[0]
+    in_name = inp.name
+    shape = inp.shape  # e.g. [N, C, H, W] or [N, 3, H, W]
+    # 推断输入尺寸
+    h_in, w_in = None, None
+    if input_size and len(input_size) == 2:
+        h_in, w_in = int(input_size[0]), int(input_size[1])
+    else:
+        try:
+            h_in = int(shape[2]) if isinstance(shape[2], int) else 224
+            w_in = int(shape[3]) if isinstance(shape[3], int) else 224
+        except Exception:
+            h_in, w_in = 224, 224
+
+    ch = 3
+    try:
+        c_dim = shape[1]
+        if isinstance(c_dim, int) and c_dim > 0:
+            ch = c_dim
+    except Exception:
+        ch = 3
+
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if img.ndim == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    resized = cv2.resize(rgb, (w_in, h_in), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+    if mean is not None and len(mean) == 3:
+        resized = resized - np.array(mean, dtype=np.float32).reshape(1, 1, 3)
+    if std is not None and len(std) == 3:
+        resized = resized / np.maximum(np.array(std, dtype=np.float32).reshape(1, 1, 3), 1e-6)
+    else:
+        resized = resized / 255.0
+    if ch == 1:
+        resized = cv2.cvtColor(resized.astype(np.uint8) if resized.max() > 2 else rgb,
+                               cv2.COLOR_RGB2GRAY)[:, :, None].astype(np.float32)
+    tensor = np.transpose(resized, (2, 0, 1))[None, ...].astype(np.float32)
+
+    outputs = sess.run(None, {in_name: tensor})
+    raw = np.asarray(outputs[0]).reshape(-1).astype(np.float64)
+
+    result: Dict[str, Any] = {"task": task, "model": os.path.basename(model_path),
+                              "output_dim": int(raw.size)}
+    if str(task).lower() == "classification":
+        # softmax
+        e = np.exp(raw - np.max(raw))
+        probs = e / np.sum(e)
+        order = np.argsort(-probs)[:max(1, int(top_k))]
+        result["predictions"] = [
+            {"class_index": int(i), "score": round(float(probs[i]), 5)} for i in order
+        ]
+        result["top1"] = int(order[0])
+        result["top1_score"] = round(float(probs[order[0]]), 5)
+    else:
+        result["values"] = [round(float(v), 5) for v in raw[:64]]
+    return result

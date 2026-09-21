@@ -294,6 +294,48 @@ document.addEventListener('DOMContentLoaded', () => {
     viewport.resetZoom();
   });
 
+  // 8b. ROI 绘制工具栏
+  const _setRoiBtn = (activeMode) => {
+    ['btnRoiRect', 'btnRoiCircle', 'btnRoiPoly'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('active', id === activeMode);
+    });
+  };
+  document.getElementById('btnRoiRect').addEventListener('click', () => {
+    const m = viewport.setRoiMode('rect'); _setRoiBtn(m === 'rect' ? 'btnRoiRect' : null);
+  });
+  document.getElementById('btnRoiCircle').addEventListener('click', () => {
+    const m = viewport.setRoiMode('circle'); _setRoiBtn(m === 'circle' ? 'btnRoiCircle' : null);
+  });
+  document.getElementById('btnRoiPoly').addEventListener('click', () => {
+    const m = viewport.setRoiMode('polygon'); _setRoiBtn(m === 'polygon' ? 'btnRoiPoly' : null);
+  });
+  document.getElementById('btnRoiClear').addEventListener('click', () => {
+    viewport.clearRoi(); _setRoiBtn(null);
+  });
+  // 多边形: 双击 / Enter 闭合
+  viewport.stage.addEventListener('dblclick', () => {
+    if (viewport.roiMode === 'polygon') { viewport.finishPolygon(); _setRoiBtn(null); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && viewport.roiMode === 'polygon') { viewport.finishPolygon(); _setRoiBtn(null); }
+  });
+  // ROI 绘制完成 -> 写入当前激活的 reduce_domain 步骤
+  viewport.onRoiComplete = (geometry) => {
+    const step = pipelineUI.steps.find(st => st.id === pipelineUI.activeStepId);
+    if (step && step.operator === 'reduce_domain') {
+      step.params = step.params || {};
+      if (geometry) {
+        step.params.geometry = geometry;
+        step.params.roi_type = geometry.type;
+      } else {
+        delete step.params.geometry;
+      }
+      pipelineUI.renderInspector?.();
+      pipelineUI.emitUpdateDebounced();
+    }
+  };
+
   // 图层开关
   document.getElementById('chkLayerImage').addEventListener('change', (e) => {
     viewport.showImage = e.target.checked;
@@ -385,7 +427,84 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(url);
   });
 
-  // 11. 初始化交互式 Python 代码工作室 (Code Mode)
+  // 导出 HDevelop (.hdev) 脚本
+  const btnExportHdev = document.getElementById('btnExportHdev');
+  if (btnExportHdev) {
+    btnExportHdev.addEventListener('click', async () => {
+      try {
+        const resp = await apiFetch('/api/hdev/from_pipeline', {
+          method: 'POST',
+          body: JSON.stringify({ format: 'plain' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+          const blob = new Blob([data.code], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'navivision_script.hdev';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      } catch (err) {
+        alert('导出 HDevelop 脚本失败: ' + err);
+      }
+    });
+  }
+
+  // 导入 HDevelop (.hdev / .hdvp) 脚本
+  const btnUploadHdev = document.getElementById('btnUploadHdev');
+  const hdevFileInput = document.getElementById('hdevFileInput');
+  if (btnUploadHdev && hdevFileInput) {
+    btnUploadHdev.addEventListener('click', () => {
+      hdevFileInput.click();
+    });
+    hdevFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const resp = await fetch('/api/hdev/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await resp.json();
+        if (data.success) {
+          btnModeCode.click();
+          const langSelect = document.getElementById('codeLangSelect');
+          if (langSelect) {
+            langSelect.value = 'hdev';
+            codeEditor.updateLanguageUI('hdev');
+          }
+          codeEditor.editor.value = data.code;
+          codeEditor.updateLineNumbers();
+          codeEditor.logToConsole(`[✓] 成功载入外部 HDevelop 脚本 '${data.filename}' (共 ${data.instruction_count} 条有效指令)`, 'success');
+          codeEditor.runScript();
+        }
+      } catch (err) {
+        alert('导入并解析 .hdev 文件失败: ' + err);
+      } finally {
+        hdevFileInput.value = '';
+      }
+    });
+  }
+
+  // 监听 HDevelop 脚本转译同步到流水线事件
+  window.addEventListener('navivision:pipeline-synced', (e) => {
+    const data = e.detail;
+    if (data && data.steps) {
+      pipelineUI.steps = data.steps;
+      pipelineUI.renderSteps();
+      if (data.results) {
+        currentResults = data.results;
+        updateDisplay();
+      }
+      btnModePipeline.click();
+    }
+  });
+
+  // 11. 初始化交互式代码工作室 (Code Mode)
   const scriptEditorEl = document.getElementById('scriptEditor');
   const lineNumbersEl = document.getElementById('editorLineNumbers');
   const terminalLogsEl = document.getElementById('terminalLogs');

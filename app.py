@@ -17,13 +17,14 @@ from fastapi import FastAPI, UploadFile, File, Form, Body, HTTPException, Reques
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from core.pipeline import Pipeline
 from core.session_manager import session_manager
 from core.code_generator import generate_python_code
 from core.script_runner import execute_custom_script
 from core.api_service import run_pipeline_inference
+from core.hdev_engine import HDevParser, HDevInterpreter, HDevTranspiler
 from core import operators as ops
 
 app = FastAPI(
@@ -168,19 +169,31 @@ class PipelineStep(BaseModel):
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     operator: Literal[
         "read_image", "rgb1_to_gray", "threshold", "auto_threshold", "connection",
-        "select_shape", "morphology", "filter", "edges_subpix", "measure_region"
+        "select_shape", "morphology", "filter", "edges_subpix", "measure_region",
+        "rgb_to_hsv", "hsv_threshold", "find_shape_model", "gen_contour_polygon",
+        "read_barcode", "calibrate", "read_text",
+        "reduce_domain", "measure_pos", "merge_images", "onnx_inference"
     ]
     enabled: bool = True
     params: Dict[str, Any] = Field(default_factory=dict)
+
+    # 允许结构化参数 (ROI 几何 / 多边形顶点 / ONNX 尺寸均值) 的算子
+    _STRUCTURED_PARAM_OPS = {"reduce_domain", "measure_pos", "merge_images", "onnx_inference"}
 
     @field_validator("params")
     @classmethod
     def validate_params(cls, value: Dict[str, Any]) -> Dict[str, Any]:
         if len(value) > 20:
             raise ValueError("单个算子最多支持 20 个参数")
-        if any(isinstance(item, (dict, list, tuple, set)) for item in value.values()):
-            raise ValueError("算子参数必须是基础 JSON 值")
         return value
+
+    @model_validator(mode="after")
+    def _check_param_shape(self):
+        if self.operator in self._STRUCTURED_PARAM_OPS:
+            return self
+        if any(isinstance(item, (dict, list, tuple, set)) for item in self.params.values()):
+            raise ValueError("算子参数必须是基础 JSON 值")
+        return self
 
 
 class PipelineUpdateRequest(BaseModel):
@@ -373,6 +386,76 @@ async def run_custom_script(request: Request, req: ScriptRunRequest):
         timeout_sec=3.0
     )
     return JSONResponse(content=res)
+
+
+# --- HDevelop DSL 交互与转译接口 ---
+class HDevRunRequest(BaseModel):
+    code: str
+    display_target: Optional[str] = None
+
+
+class HDevTranspileRequest(BaseModel):
+    code: str
+
+
+class HDevExportRequest(BaseModel):
+    format: Optional[str] = "plain"  # "plain" 或 "xml"
+
+
+@app.post("/api/hdev/run")
+async def run_hdev_script(request: Request, req: HDevRunRequest):
+    """在 HDevInterpreter 沙箱中执行 HDevelop 4GL 脚本并返回终端与多图层渲染数据"""
+    pipeline = get_pipeline(request)
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = HDevInterpreter(base_image=pipeline.source_image, session_id=sid)
+    if req.display_target:
+        interpreter.display_target = req.display_target
+    res = interpreter.execute_script(req.code, timeout_sec=3.0)
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/to_pipeline")
+async def hdev_to_pipeline_endpoint(request: Request, req: HDevTranspileRequest):
+    """将 HDevelop 脚本转译为 NaviVision 可视化流水线步骤并立即执行"""
+    pipeline = get_pipeline(request)
+    steps = HDevTranspiler.hdev_to_pipeline(req.code)
+    results = pipeline.set_steps(steps)
+    return JSONResponse(content={
+        "success": True,
+        "steps": steps,
+        "results": results
+    })
+
+
+@app.post("/api/hdev/from_pipeline")
+async def hdev_from_pipeline_endpoint(request: Request, req: HDevExportRequest = Body(default=HDevExportRequest())):
+    """将当前会话的可视化流水线步骤导出为标准 HDevelop 脚本代码"""
+    pipeline = get_pipeline(request)
+    is_xml = (req.format or "").lower() == "xml"
+    hdev_code = HDevTranspiler.pipeline_to_hdev(pipeline.steps, format_as_xml=is_xml)
+    return JSONResponse(content={
+        "success": True,
+        "format": "xml" if is_xml else "plain",
+        "code": hdev_code
+    })
+
+
+@app.post("/api/hdev/upload")
+async def upload_hdev_file(request: Request, file: UploadFile = File(...)):
+    """上传 .hdev / .hdvp 文件并提取脚本代码"""
+    contents = await file.read()
+    try:
+        text_content = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        text_content = contents.decode("gbk", errors="ignore")
+
+    instructions = HDevParser.parse_script(text_content)
+    return JSONResponse(content={
+        "success": True,
+        "filename": file.filename,
+        "code": text_content,
+        "instruction_count": len(instructions)
+    })
 
 
 # --- 外部工业推理 REST API ---
