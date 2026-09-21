@@ -14,6 +14,7 @@ import math
 from core import operators as ops
 from core.pipeline import Pipeline
 from core.code_generator import generate_python_code
+from fixtures import make_blob_image
 
 def test_all():
     print("==================================================")
@@ -21,7 +22,7 @@ def test_all():
     print("==================================================")
 
     # 1. 图像载入测试
-    img = ops.read_image_from_path("samples/pills_inspection.png")
+    img = make_blob_image()
     assert img is not None, "图像载入失败"
     print(f"[PASS] 1. 底图载入成功: shape={img.shape}")
 
@@ -125,7 +126,7 @@ def test_all():
     print("[PASS] 7. 缓存失效高敏测试通过: 上游参数变动触发精准级联重算，彻底告别调参无响应！")
 
     # 6. 代码生成器测试
-    py_code = generate_python_code(steps, "samples/pills_inspection.png")
+    py_code = generate_python_code(steps, "input.png")
     assert "measure_region" in py_code, "代码生成器未包含 measure_region"
     assert "minAreaRect" in py_code, "代码生成器未正确生成 OBB 几何计算"
     print(f"[PASS] 8. Python 独立脚本代码生成器验证通过 ({len(py_code.splitlines())} 行代码)")
@@ -176,6 +177,7 @@ result_data = {"test_metric": 42.0}
     loaded_proj = json.loads(proj_dump)
     assert loaded_proj["format"] == "navivision_project"
     p_charlie = session_manager.get_pipeline("charlie")
+    p_charlie.load_source_image(img)
     res_charlie = p_charlie.set_steps(loaded_proj["steps"])
     assert len(res_charlie) == 1 and res_charlie[0]["operator"] == "threshold"
     print("[PASS] 13. 视觉工程持久化 (.nvproj) 验证通过: 导出/导入/反序列化重算全链路畅通")

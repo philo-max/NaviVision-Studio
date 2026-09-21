@@ -34,12 +34,6 @@ f:\计算机视觉\
 │   ├── api_service.py         # 外部工业推理服务调度器
 │   └── types.py               # 核心数据结构定义 (Region, RegionObject, XLDContour, StepResult)
 │
-├── samples/                   # 预设工业测试用例与样本生成器
-│   ├── generate_samples.py    # 合成样本数据生成脚本
-│   ├── pills_inspection.png   # 药板药丸瑕疵检测样本 (带缺失/破损)
-│   ├── pcb_components.png     # PCB 芯片引脚与贴片电阻样本
-│   └── metal_parts.png        # 工业工件与垫圈测量样本
-│
 ├── static/                    # 前端 Web IDE 交互界面
 │   ├── index.html             # 单页面应用入口
 │   ├── css/

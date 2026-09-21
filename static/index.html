@@ -51,13 +51,6 @@
     </div>
 
     <div class="header-center">
-      <label class="sample-selector">
-        <span class="sample-label">案例</span>
-        <select id="sampleSelect">
-          <option value="pills">载入中...</option>
-        </select>
-      </label>
-      <span class="toolbar-divider"></span>
       <input type="file" id="uploadInput" accept="image/*" hidden>
       <input type="file" id="projectFileInput" accept=".nvproj,.json" hidden>
       <input type="file" id="batchInput" accept="image/*" multiple hidden>
@@ -202,6 +195,14 @@
         <canvas id="imageCanvas" class="canvas-layer"></canvas>
         <canvas id="maskCanvas" class="canvas-layer"></canvas>
         <canvas id="vectorCanvas" class="canvas-layer"></canvas>
+        <div class="empty-state" id="emptyState">
+          <svg class="icon empty-state-icon"><use href="#i-image"/></svg>
+          <h2 class="empty-state-title">尚未载入图像</h2>
+          <p class="empty-state-hint">打开一张图像，再从左侧「添加算子」搭建处理流水线。支持 PNG / JPG / BMP / TIFF 等常见格式。</p>
+          <button class="btn btn-accent" id="btnEmptyOpen">
+            <svg class="icon"><use href="#i-image"/></svg>打开图片
+          </button>
+        </div>
       </div>
 
       <!-- 底部像素十字丝遥测 HUD -->

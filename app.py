@@ -63,47 +63,6 @@ def read_uploaded_image(contents: bytes) -> np.ndarray:
     return image
 
 
-# 静态测试样本定义
-SAMPLES = [
-    {
-        "id": "pills",
-        "title": "药板药丸瑕疵检测",
-        "desc": "双阈值 + 连通域 + 面积筛选 (检测缺失/残缺药丸)",
-        "path": "samples/pills_inspection.png",
-        "default_steps": [
-            {"id": "s_read", "operator": "read_image", "enabled": True, "params": {}},
-            {"id": "s_thresh", "operator": "threshold", "enabled": True, "params": {"min_gray": 180, "max_gray": 255}},
-            {"id": "s_conn", "operator": "connection", "enabled": True, "params": {"connectivity": 8}},
-            {"id": "s_select", "operator": "select_shape", "enabled": True, "params": {"min_area": 1000, "max_area": 3000, "min_circularity": 0.8, "max_circularity": 1.0}}
-        ]
-    },
-    {
-        "id": "pcb",
-        "title": "PCB 芯片引脚与过孔",
-        "desc": "Canny/XLD 亚像素轮廓提取 + 引脚焊盘形态学检测",
-        "path": "samples/pcb_components.png",
-        "default_steps": [
-            {"id": "s_read", "operator": "read_image", "enabled": True, "params": {}},
-            {"id": "s_edge", "operator": "edges_subpix", "enabled": True, "params": {"low_threshold": 40, "high_threshold": 120}},
-            {"id": "s_thresh", "operator": "threshold", "enabled": True, "params": {"min_gray": 160, "max_gray": 255}},
-            {"id": "s_morph", "operator": "morphology", "enabled": True, "params": {"op_type": "closing", "kernel_shape": "circle", "kernel_size": 3}}
-        ]
-    },
-    {
-        "id": "gears",
-        "title": "工业工件与垫圈测量",
-        "desc": "Otsu 大津自适应分割 + 开运算降噪 + 特征度量",
-        "path": "samples/metal_parts.png",
-        "default_steps": [
-            {"id": "s_read", "operator": "read_image", "enabled": True, "params": {}},
-            {"id": "s_otsu", "operator": "auto_threshold", "enabled": True, "params": {"invert": False}},
-            {"id": "s_morph", "operator": "morphology", "enabled": True, "params": {"op_type": "opening", "kernel_shape": "circle", "kernel_size": 3}},
-            {"id": "s_conn", "operator": "connection", "enabled": True, "params": {"connectivity": 8}},
-            {"id": "s_select", "operator": "select_shape", "enabled": True, "params": {"min_area": 500, "max_area": 999999, "min_circularity": 0.2, "max_circularity": 1.0}}
-        ]
-    }
-]
-
 # 挂载静态资源
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
@@ -114,33 +73,9 @@ async def get_index():
         return f.read()
 
 
-@app.get("/api/samples")
-async def get_samples():
-    return JSONResponse(content=SAMPLES)
-
-
 @app.get("/healthz")
 async def health_check():
     return {"status": "ok", "version": app.version, "script_runner_enabled": ENABLE_SCRIPT_RUNNER}
-
-
-@app.post("/api/load_sample")
-async def load_sample(request: Request, payload: Dict[str, str]):
-    sample_id = payload.get("id")
-    match = next((s for s in SAMPLES if s["id"] == sample_id), None)
-    if not match:
-        return JSONResponse(status_code=404, content={"error": "Sample not found"})
-
-    pipeline = get_pipeline(request)
-    img = ops.read_image_from_path(BASE_DIR / match["path"])
-    pipeline.load_source_image(img)
-    results = pipeline.set_steps(match["default_steps"])
-    return {
-        "success": True,
-        "sample": match,
-        "steps": match["default_steps"],
-        "results": results
-    }
 
 
 @app.post("/api/upload")

@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const pipelineListEl = document.getElementById('pipelineList');
   const inspectorContentEl = document.getElementById('inspectorContent');
 
-  let currentSamples = [];
   let currentResults = [];
 
   // 0. 多租户会话 ID 管理
@@ -61,7 +60,16 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // 3. 根据当前激活步骤刷新视口
+  const emptyStateEl = document.getElementById('emptyState');
+  function syncEmptyState() {
+    emptyStateEl.hidden = currentResults.length > 0;
+  }
+  document.getElementById('btnEmptyOpen').addEventListener('click', () => {
+    document.getElementById('uploadInput').click();
+  });
+
   function updateViewportFromActiveStep() {
+    syncEmptyState();
     const step = pipelineUI.getActiveStep();
     const res = pipelineUI.getActiveResult();
     if (!res) return;
@@ -142,52 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
-
-  // 5. 加载样本列表
-  async function loadSamplesList() {
-    try {
-      const resp = await apiFetch('/api/samples');
-      currentSamples = await resp.json();
-      const sel = document.getElementById('sampleSelect');
-      sel.innerHTML = '';
-      currentSamples.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = `${s.title}`;
-        sel.appendChild(opt);
-      });
-
-      // 默认加载第一个样本
-      if (currentSamples.length > 0) {
-        loadSampleById(currentSamples[0].id);
-      }
-    } catch (err) {
-      console.error('Failed to load samples:', err);
-    }
-  }
-
-  async function loadSampleById(id) {
-    try {
-      const resp = await apiFetch('/api/load_sample', {
-        method: 'POST',
-        body: JSON.stringify({ id })
-      });
-      const data = await resp.json();
-      if (data.success) {
-        currentResults = data.results;
-        viewport.baseImage = null; // 重置底图缓存
-        pipelineUI.setPipelineData(data.steps, data.results);
-        updateViewportFromActiveStep();
-        updateObjectTable();
-      }
-    } catch (err) {
-      console.error('Failed to switch sample:', err);
-    }
-  }
-
-  document.getElementById('sampleSelect').addEventListener('change', (e) => {
-    loadSampleById(e.target.value);
-  });
 
   // 6. 本地图片上传
   const uploadInput = document.getElementById('uploadInput');
@@ -544,6 +506,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 启动加载
-  loadSamplesList();
+  async function restoreSession() {
+    try {
+      const exported = await (await apiFetch('/api/project/export')).json();
+      if (!Array.isArray(exported.steps) || exported.steps.length === 0) return;
+
+      const resp = await apiFetch('/api/project/import', {
+        method: 'POST',
+        body: JSON.stringify({ steps: exported.steps })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        currentResults = data.results;
+        viewport.baseImage = null;
+        pipelineUI.setPipelineData(data.steps, data.results);
+        updateViewportFromActiveStep();
+        updateObjectTable();
+      }
+    } catch (err) {
+      console.error('Failed to restore session:', err);
+    }
+  }
+
+  // 启动: 空工作区, 若服务端会话已有流水线则恢复
+  syncEmptyState();
+  restoreSession();
 });

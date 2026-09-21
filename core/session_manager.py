@@ -5,10 +5,8 @@ NaviVision Studio - Multi-Tenant Session Manager
 
 import time
 import threading
-from pathlib import Path
 from typing import Dict, Optional, List, Any
 from core.pipeline import Pipeline
-from core import operators as ops
 
 
 class SessionManager:
@@ -28,17 +26,6 @@ class SessionManager:
 
             if sid not in self._sessions:
                 pipeline = Pipeline()
-                # 为新会话载入默认样本
-                default_sample_path = Path(__file__).resolve().parent.parent / "samples" / "pills_inspection.png"
-                if default_sample_path.exists():
-                    img = ops.read_image_from_path(default_sample_path)
-                    pipeline.load_source_image(img)
-                    pipeline.set_steps([
-                        {"id": "s_read", "operator": "read_image", "enabled": True, "params": {}},
-                        {"id": "s_thresh", "operator": "threshold", "enabled": True, "params": {"min_gray": 180, "max_gray": 255}},
-                        {"id": "s_conn", "operator": "connection", "enabled": True, "params": {"connectivity": 8}},
-                        {"id": "s_select", "operator": "select_shape", "enabled": True, "params": {"min_area": 1000, "max_area": 3000, "min_circularity": 0.8, "max_circularity": 1.0}}
-                    ])
                 self._sessions[sid] = pipeline
                 self._cleanup_expired(now)
 
