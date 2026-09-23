@@ -11,6 +11,7 @@ import re
 import xml.etree.ElementTree as ET
 import time
 import math
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
@@ -18,6 +19,18 @@ import numpy as np
 from core.types import Region, RegionObject, XLDContour
 from core import operators as ops
 from core.pipeline import encode_image_base64, create_colored_label_mask
+
+
+@dataclass
+class _WindowState:
+    """模拟 HALCON 单个图形窗口的叠加显示状态"""
+    handle: int
+    image_name: Optional[str] = None
+    region_names: List[str] = field(default_factory=list)
+    xld_names: List[str] = field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return self.image_name is None and not self.region_names and not self.xld_names
 
 
 # ----------------------------------------------------------------------
@@ -71,6 +84,7 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "dev_clear_window": ([], [], [], []),
     "dev_open_window": ([], [], ["Row", "Column", "Width", "Height", "Background"], ["WindowHandle"]),
     "dev_open_window_fit_image": (["Image"], [], ["Row", "Column", "WidthLimit", "HeightLimit"], ["WindowHandle"]),
+    "dev_set_window": ([], [], ["WindowHandle"], []),
     "dev_set_color": ([], [], ["ColorName"], []),
     "dev_set_line_width": ([], [], ["LineWidth"], []),
     "dev_set_draw": ([], [], ["DrawMode"], []),
@@ -392,22 +406,28 @@ class HDevInterpreter:
         self.display_target: Optional[str] = None
         # 脚本执行前的原始底图快照 (用于前后对比视图), 首次载入后不再变更
         self.original_snapshot: Optional[np.ndarray] = None
-        # HALCON dev_display 叠加语义模拟: 显示图像会重绘整个画布并清空叠加层,
-        # 而 Region/XLD 的显示则在当前画布上叠加绘制, 直到下次显示新图像或 dev_clear_window
-        self.display_image_name: Optional[str] = None
-        self.display_region_names: List[str] = []
-        self.display_xld_names: List[str] = []
-        # 脚本中是否显式调用过 dev_display/disp_obj (决定渲染走叠加模式还是单目标覆盖模式)
+        # HALCON 多图形窗口模拟: 每个窗口独立维护自己的叠加显示状态
+        # (显示图像会重绘整个画布并清空该窗口的叠加层, 而 Region/XLD 的显示
+        # 则在当前活跃窗口上叠加绘制, 直到下次显示新图像或 dev_clear_window)
+        self.windows: Dict[int, _WindowState] = {0: _WindowState(handle=0)}
+        self.active_window: int = 0
+        self._next_window_handle: int = 1
+        # 脚本中是否显式调用过 dev_display/disp_obj/dev_open_window (决定渲染走叠加模式还是单目标覆盖模式)
         self.explicit_display_used: bool = False
-        # 默认底图注入
+        # 默认底图注入 (注意: 不标记窗口 0 为"已使用", 否则会在多窗口场景下
+        # 被误判为脚本主动打开的窗口而出现在窗口切换标签页里; 各窗口合成画面时
+        # 仍会在找不到自己专属底图时回退取用这张预注入的图像, 见 _composite_window)
         if base_image is not None:
             self.iconic_vars["Image"] = base_image
             self.display_target = "Image"
-            self.display_image_name = "Image"
             self.original_snapshot = base_image.copy()
 
     def log(self, msg: str):
         self.stdout.append(str(msg))
+
+    def _cur_win(self) -> _WindowState:
+        """返回当前活跃图形窗口的叠加显示状态"""
+        return self.windows[self.active_window]
 
     def _eval_expr(self, expr: Any) -> Any:
         """解析并计算表达式或变量求值"""
@@ -718,27 +738,60 @@ class HDevInterpreter:
             if obj is not None:
                 self.explicit_display_used = True
                 self.display_target = in_name
+                win = self._cur_win()
                 if isinstance(obj, np.ndarray):
                     # 显示新图像 = 整个画布被重绘, 之前叠加的 Region/XLD 不再可见
-                    self.display_image_name = in_name
-                    self.display_region_names = []
-                    self.display_xld_names = []
-                    self.log(f"  [{inst.line_num}] {op}: 显示图像 '{in_name}' (画布重绘, 叠加层已清空)")
+                    win.image_name = in_name
+                    win.region_names = []
+                    win.xld_names = []
+                    self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 显示图像 '{in_name}' (画布重绘, 叠加层已清空)")
                 elif isinstance(obj, Region):
-                    if in_name not in self.display_region_names:
-                        self.display_region_names.append(in_name)
-                    self.log(f"  [{inst.line_num}] {op}: 叠加显示 Region '{in_name}' (当前叠加层: {self.display_region_names})")
+                    if in_name not in win.region_names:
+                        win.region_names.append(in_name)
+                    self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 叠加显示 Region '{in_name}' (当前叠加层: {win.region_names})")
                 elif isinstance(obj, list) and obj and isinstance(obj[0], XLDContour):
-                    if in_name not in self.display_xld_names:
-                        self.display_xld_names.append(in_name)
-                    self.log(f"  [{inst.line_num}] {op}: 叠加显示 XLD 轮廓 '{in_name}' (当前叠加层: {self.display_xld_names})")
+                    if in_name not in win.xld_names:
+                        win.xld_names.append(in_name)
+                    self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 叠加显示 XLD 轮廓 '{in_name}' (当前叠加层: {win.xld_names})")
 
-        # 12b. dev_clear_window: 清空当前图形窗口的所有叠加层
+        # 12b. dev_clear_window: 清空当前活跃图形窗口的所有叠加层
         elif op == "dev_clear_window":
-            self.display_image_name = None
-            self.display_region_names = []
-            self.display_xld_names = []
-            self.log(f"  [{inst.line_num}] dev_clear_window: 已清空画布叠加层")
+            win = self._cur_win()
+            win.image_name = None
+            win.region_names = []
+            win.xld_names = []
+            self.log(f"  [{inst.line_num}] dev_clear_window: 已清空窗口 #{win.handle} 的叠加层")
+
+        # 12c. dev_open_window / dev_open_window_fit_image: 新建图形窗口并设为当前活跃窗口
+        elif op in ("dev_open_window", "dev_open_window_fit_image"):
+            handle = self._next_window_handle
+            self._next_window_handle += 1
+            self.windows[handle] = _WindowState(handle=handle)
+            self.active_window = handle
+            self.explicit_display_used = True
+            out_var = c_out[0] if c_out else "WindowHandle"
+            self.control_vars[out_var] = handle
+            self.log(f"  [{inst.line_num}] {op}: 打开图形窗口 #{handle} 并设为当前活跃窗口 -> {out_var}")
+
+        # 12d. dev_close_window: 关闭当前活跃图形窗口
+        elif op == "dev_close_window":
+            closed = self.active_window
+            self.windows.pop(closed, None)
+            if not self.windows:
+                self.windows[0] = _WindowState(handle=0)
+                self.active_window = 0
+            else:
+                self.active_window = max(self.windows.keys())
+            self.log(f"  [{inst.line_num}] dev_close_window: 关闭窗口 #{closed}, 当前活跃窗口切换为 #{self.active_window}")
+
+        # 12e. dev_set_window: 切换当前活跃图形窗口 (用于在多窗口间来回绘制)
+        elif op == "dev_set_window":
+            handle = int(c_in[0]) if c_in else 0
+            if handle not in self.windows:
+                self.windows[handle] = _WindowState(handle=handle)
+            self.active_window = handle
+            self.explicit_display_used = True
+            self.log(f"  [{inst.line_num}] dev_set_window: 切换当前活跃窗口为 #{handle}")
 
         # 13. 色彩空间转换: rgb_to_hsv, hsv_threshold
         elif op == "rgb_to_hsv":
@@ -895,24 +948,16 @@ class HDevInterpreter:
             return self._build_layered_visualization_payload()
         return self._build_single_target_visualization_payload()
 
-    def _build_layered_visualization_payload(self) -> Dict[str, Any]:
-        """
-        叠加模式 (脚本中显式调用过 dev_display/disp_obj 时启用):
-        模拟 HALCON 图形窗口语义 —— 当前显示的图像作为画布底图,
-        其后所有仍处于叠加状态的 Region/XLD 依次叠加绘制在其上。
-        """
+    def _composite_window(self, win: _WindowState) -> Dict[str, Any]:
+        """将单个图形窗口当前的叠加状态 (底图 + Region 掩膜 + XLD 轮廓) 合成为可渲染的画面数据"""
         res: Dict[str, Any] = {
             "preview_base64": None,
-            "original_base64": None,
             "mask_base64": None,
             "contours": [],
             "objects": []
         }
 
-        if self.original_snapshot is not None:
-            res["original_base64"] = encode_image_base64(self.original_snapshot)
-
-        base_img = self.iconic_vars.get(self.display_image_name) if self.display_image_name else None
+        base_img = self.iconic_vars.get(win.image_name) if win.image_name else None
         if base_img is None:
             for v in self.iconic_vars.values():
                 if isinstance(v, np.ndarray):
@@ -923,7 +968,7 @@ class HDevInterpreter:
 
         merged_mask = None
         all_objects: List[Dict[str, Any]] = []
-        for name in self.display_region_names:
+        for name in win.region_names:
             reg = self.iconic_vars.get(name)
             if not isinstance(reg, Region) or base_img is None:
                 continue
@@ -948,11 +993,37 @@ class HDevInterpreter:
             res["objects"] = all_objects
 
         all_contours: List[List[Tuple[float, float]]] = []
-        for name in self.display_xld_names:
+        for name in win.xld_names:
             xld_list = self.iconic_vars.get(name)
             if isinstance(xld_list, list):
                 all_contours.extend([c.points for c in xld_list if isinstance(c, XLDContour)])
         res["contours"] = all_contours
+
+        return res
+
+    def _build_layered_visualization_payload(self) -> Dict[str, Any]:
+        """
+        叠加模式 (脚本中显式调用过 dev_display/disp_obj/dev_open_window 时启用):
+        模拟 HALCON 多图形窗口语义 —— 每个窗口独立合成自己的底图 + Region + XLD 叠加画面,
+        接口主字段始终反映当前活跃窗口, 若脚本打开过多个仍有内容的窗口, 则额外在
+        `windows` 数组中列出每个窗口各自的画面数据, 供前端渲染窗口切换标签页。
+        """
+        res = self._composite_window(self._cur_win())
+        res["original_base64"] = encode_image_base64(self.original_snapshot) if self.original_snapshot is not None else None
+
+        used_windows = [w for w in self.windows.values() if not w.is_empty()]
+        if len(used_windows) > 1:
+            res["windows"] = [
+                {
+                    "handle": w.handle,
+                    "label": f"窗口 #{w.handle}",
+                    "active": w.handle == self.active_window,
+                    **self._composite_window(w)
+                }
+                for w in sorted(used_windows, key=lambda w: w.handle)
+            ]
+        else:
+            res["windows"] = []
 
         return res
 
@@ -1001,6 +1072,7 @@ class HDevInterpreter:
         elif isinstance(target, list) and target and isinstance(target[0], XLDContour):
             res["contours"] = [c.points for c in target]
 
+        res["windows"] = []
         return res
 
 

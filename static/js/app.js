@@ -535,42 +535,47 @@ document.addEventListener('DOMContentLoaded', () => {
   const lineNumbersEl = document.getElementById('editorLineNumbers');
   const terminalLogsEl = document.getElementById('terminalLogs');
 
-  const codeEditor = new InteractiveCodeEditor(scriptEditorEl, lineNumbersEl, terminalLogsEl, (result) => {
-    // 脚本沙箱返回结果，投射到 Viewport
-    lastCodeRunResult = result;
-    if (!compareView.hidden) refreshCompareView();
+  function renderScriptResultToViewport(result) {
+    // 脚本沙箱返回结果 (或某个图形窗口的合成画面)，投射到 Viewport
     if (result.preview_base64) {
       viewport.renderImage(result.preview_base64);
     }
-    if (result.mask_base64) {
-      viewport.renderMask(result.mask_base64, result.objects || []);
+    viewport.renderMask(result.mask_base64 || null, result.objects || []);
+    viewport.renderContours(result.contours || []);
+
+    const tableBody = document.getElementById('objectTableBody');
+    const countBadge = document.getElementById('tabObjCount');
+    const objects = result.objects || [];
+    if (countBadge) countBadge.textContent = `(${objects.length})`;
+    if (tableBody) {
+      let html = '';
+      objects.forEach(obj => {
+        const circ = obj.circularity !== undefined ? obj.circularity : 'N/A';
+        const centroidStr = obj.centroid ? `(${Math.round(obj.centroid[0])}, ${Math.round(obj.centroid[1])})` : 'N/A';
+        html += `
+          <tr data-obj-id="${obj.id}">
+            <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
+            <td>${obj.area}</td>
+            <td>${circ}</td>
+            <td>${centroidStr}</td>
+            <td style="font-size:10px;color:var(--text-muted);">${obj.bbox ? `[${obj.bbox.join(',')}]` : ''}</td>
+          </tr>
+        `;
+      });
+      tableBody.innerHTML = html;
     }
-    if (result.contours && result.contours.length > 0) {
-      viewport.renderContours(result.contours);
-    }
-    if (result.objects && result.objects.length > 0) {
-      const tableBody = document.getElementById('objectTableBody');
-      const countBadge = document.getElementById('tabObjCount');
-      if (countBadge) countBadge.textContent = `(${result.objects.length})`;
-      if (tableBody) {
-        let html = '';
-        result.objects.forEach(obj => {
-          const circ = obj.circularity !== undefined ? obj.circularity : 'N/A';
-          const centroidStr = obj.centroid ? `(${Math.round(obj.centroid[0])}, ${Math.round(obj.centroid[1])})` : 'N/A';
-          html += `
-            <tr data-obj-id="${obj.id}">
-              <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
-              <td>${obj.area}</td>
-              <td>${circ}</td>
-              <td>${centroidStr}</td>
-              <td style="font-size:10px;color:var(--text-muted);">${obj.bbox ? `[${obj.bbox.join(',')}]` : ''}</td>
-            </tr>
-          `;
-        });
-        tableBody.innerHTML = html;
-      }
-    }
+  }
+
+  const codeEditor = new InteractiveCodeEditor(scriptEditorEl, lineNumbersEl, terminalLogsEl, (result) => {
+    lastCodeRunResult = result;
+    if (!compareView.hidden) refreshCompareView();
+    renderScriptResultToViewport(result);
   });
+
+  // 多图形窗口标签页切换: 直接用该窗口已合成好的画面数据重绘视口, 无需重新执行脚本
+  codeEditor.onWindowSelect = (win) => {
+    renderScriptResultToViewport(win);
+  };
 
   // 运行代码按钮
   document.getElementById('btnRunScript').addEventListener('click', () => {

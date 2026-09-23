@@ -323,6 +323,7 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
           this.logToConsole(`⏱️ 执行耗时: ${data.duration_ms} ms | 渲染目标: ${data.display_target || 'Image'}`, 'meta');
 
           this.renderIconicVarPills(data.iconic_vars || [], data.display_target);
+          this.renderWindowPills(data.windows || []);
 
           if (typeof this.onResult === 'function') {
             this.onResult(data);
@@ -413,6 +414,49 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
       pill.addEventListener('click', () => {
         this.currentDisplayTarget = v.name;
         this.runScript();
+      });
+
+      pillsContainer.appendChild(pill);
+    });
+  }
+
+  renderWindowPills(windows) {
+    const barEl = document.getElementById('hdevWindowBar');
+    const pillsContainer = document.getElementById('hdevWindowPills');
+    if (!barEl || !pillsContainer) return;
+    pillsContainer.innerHTML = '';
+
+    if (!windows || windows.length < 2) {
+      barEl.style.display = 'none';
+      return;
+    }
+    barEl.style.display = 'flex';
+
+    windows.forEach(w => {
+      const pill = document.createElement('button');
+      pill.className = `btn btn-secondary ${w.active ? 'active' : ''}`;
+      pill.style.padding = '2px 8px';
+      pill.style.fontSize = '11px';
+      pill.style.borderRadius = '12px';
+      pill.style.cursor = 'pointer';
+      pill.textContent = w.label || `窗口 #${w.handle}`;
+      if (w.active) {
+        pill.style.borderColor = 'var(--neon-cyan)';
+        pill.style.color = 'var(--neon-cyan)';
+      }
+
+      pill.addEventListener('click', () => {
+        pillsContainer.querySelectorAll('button').forEach(b => {
+          b.classList.remove('active');
+          b.style.borderColor = '';
+          b.style.color = '';
+        });
+        pill.classList.add('active');
+        pill.style.borderColor = 'var(--neon-cyan)';
+        pill.style.color = 'var(--neon-cyan)';
+        if (typeof this.onWindowSelect === 'function') {
+          this.onWindowSelect(w);
+        }
       });
 
       pillsContainer.appendChild(pill);

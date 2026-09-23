@@ -170,6 +170,12 @@
         </div>
       </div>
 
+      <!-- HDevelop 多图形窗口切换 (仅当脚本打开了多个窗口时显示) -->
+      <div id="hdevWindowBar" style="display:none;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-panel-elevated);border-bottom:1px solid var(--border-subtle);font-size:11px;">
+        <span style="color:var(--text-muted);white-space:nowrap;font-weight:600;">🪟 图形窗口:</span>
+        <div id="hdevWindowPills" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
+      </div>
+
       <!-- 代码输入区与行号 -->
       <div class="editor-wrapper">
         <div class="line-numbers-gutter" id="editorLineNumbers">1</div>
@@ -405,8 +411,8 @@ for obj in result["objects"]:
   <script src="/static/js/viewport.js?v=20260921_run"></script>
   <script src="/static/js/histogram.js?v=20260921_run"></script>
   <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
-  <script src="/static/js/code_editor.js?v=20260921_run"></script>
+  <script src="/static/js/code_editor.js?v=20260923_windows"></script>
   <script src="/static/js/operator_manual.js?v=20260923_overlay"></script>
-  <script src="/static/js/app.js?v=20260923_compare"></script>
+  <script src="/static/js/app.js?v=20260923_windows"></script>
 </body>
 </html>

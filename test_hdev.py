@@ -287,6 +287,40 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertIsNone(res3["mask_base64"])
         self.assertEqual(res3["contours"], [])
 
+    def test_11_hdev_multi_window_management(self):
+        """测试多图形窗口管理: dev_open_window / dev_set_window / dev_close_window"""
+        script = """
+        read_image (Image, 'pills')
+        threshold (Image, BrightRegion, 180, 255)
+        dev_open_window (0, 0, 400, 400, 'black', WinA)
+        dev_display (Image)
+        dev_display (BrightRegion)
+        dev_open_window (0, 0, 400, 400, 'black', WinB)
+        read_image (Image2, 'pills')
+        dev_display (Image2)
+        dev_set_window (WinA)
+        """
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+
+        win_a = interpreter.control_vars["WinA"]
+        win_b = interpreter.control_vars["WinB"]
+        self.assertNotEqual(win_a, win_b)
+        self.assertEqual(len(res["windows"]), 2)
+        self.assertEqual({w["handle"] for w in res["windows"]}, {win_a, win_b})
+
+        # dev_set_window (WinA) 应把活跃窗口切回 WinA, 主字段应反映 WinA 的内容 (带 Region 掩膜)
+        self.assertEqual(interpreter.active_window, win_a)
+        self.assertIsNotNone(res["mask_base64"])
+        active_entry = next(w for w in res["windows"] if w["handle"] == win_a)
+        self.assertTrue(active_entry["active"])
+
+        # dev_close_window 关闭当前活跃窗口后应自动切换到剩余窗口
+        res_closed = interpreter.execute_script("dev_close_window ()")
+        self.assertTrue(res_closed["success"], f"Execution error: {res_closed.get('error')}")
+        self.assertEqual(interpreter.active_window, win_b)
+
 
 if __name__ == "__main__":
     unittest.main()
