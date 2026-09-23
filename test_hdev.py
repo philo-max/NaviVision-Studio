@@ -394,6 +394,23 @@ class TestHDevelopEngine(unittest.TestCase):
             interpreter.iconic_vars["Image"].shape[:2]
         )
 
+    def test_14_hdev_original_snapshot_follows_script_read_image(self):
+        """回归测试: 若脚本自己调用了 read_image, 前后对比快照应以脚本加载的图像为准,
+        而不是被会话预注入的旧底图"锁死" (曾出现"处理前"对比画面永远是旧图的问题)"""
+        session_image = np.zeros((10, 10, 3), dtype=np.uint8)
+
+        interpreter = HDevInterpreter(base_image=session_image)
+        res = interpreter.execute_script("read_image (Image, 'pcb')\ndev_display (Image)\n")
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        self.assertFalse(np.array_equal(interpreter.original_snapshot, session_image))
+        self.assertTrue(np.array_equal(interpreter.original_snapshot, interpreter.iconic_vars["Image"]))
+
+        # 未调用 read_image 的脚本仍应兜底使用会话预注入的底图
+        interpreter2 = HDevInterpreter(base_image=session_image)
+        res2 = interpreter2.execute_script("threshold (Image, R, 0, 128)")
+        self.assertTrue(res2["success"], f"Execution error: {res2.get('error')}")
+        self.assertTrue(np.array_equal(interpreter2.original_snapshot, session_image))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -407,8 +407,11 @@ class HDevInterpreter:
         self.stdout: List[str] = []
         # 当前活跃显示目标 (Iconic 变量名)
         self.display_target: Optional[str] = None
-        # 脚本执行前的原始底图快照 (用于前后对比视图), 首次载入后不再变更
+        # 脚本执行前的原始底图快照 (用于前后对比视图)。默认取会话当前底图作为兜底,
+        # 但若脚本自己也调用了 read_image, 应以脚本内首次加载的图像为准 (见 _original_snapshot_claimed),
+        # 否则无论脚本实际处理哪张图, "处理前"对比画面都会被锁死在会话残留的旧图上
         self.original_snapshot: Optional[np.ndarray] = None
+        self._original_snapshot_claimed: bool = False
         # HALCON 多图形窗口模拟: 每个窗口独立维护自己的叠加显示状态
         # (显示图像会重绘整个画布并清空该窗口的叠加层, 而 Region/XLD 的显示
         # 则在当前活跃窗口上叠加绘制, 直到下次显示新图像或 dev_clear_window)
@@ -427,6 +430,8 @@ class HDevInterpreter:
             self.iconic_vars["Image"] = base_image
             self.display_target = "Image"
             self.original_snapshot = base_image.copy()
+            # 注意: 不设置 _original_snapshot_claimed=True, 这样如果脚本自己也调用了
+            # read_image, 会在下面的算子分支里用脚本实际加载的图像替换掉这张兜底快照
 
     def log(self, msg: str):
         self.stdout.append(str(msg))
@@ -611,8 +616,11 @@ class HDevInterpreter:
             img = ops.read_image_from_path(resolved_path)
             self.iconic_vars[out_name] = img
             self.display_target = out_name
-            if self.original_snapshot is None:
+            if not self._original_snapshot_claimed:
+                # 脚本自己的首次 read_image 才是这次运行真正的"处理前"图像,
+                # 覆盖掉构造时兜底注入的会话旧图 (否则前后对比会一直锁在旧图上)
                 self.original_snapshot = img.copy()
+                self._original_snapshot_claimed = True
             self.log(f"  [{inst.line_num}] read_image: 载入图像 '{out_name}', shape={img.shape}")
 
         # 2. rgb1_to_gray (Image, GrayImage)
