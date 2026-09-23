@@ -347,6 +347,7 @@ body {
 /* 2. Center Column: Viewport & Canvas */
 .panel-viewport {
   flex: 1;
+  min-width: 160px;
   background: var(--stage-bg);
   position: relative;
   display: flex;
@@ -1179,11 +1180,55 @@ body {
   .badge-metric {
     display: none;
   }
+  .panel-pipeline {
+    width: 260px;
+    min-width: 220px;
+  }
+  .panel-code-studio {
+    width: 420px;
+    min-width: 360px;
+  }
+  .panel-inspector {
+    width: 300px;
+    min-width: 240px;
+  }
 }
 
 @media (max-width: 900px) {
   .app-title-text {
     display: none;
+  }
+  .panel-pipeline {
+    width: 220px;
+    min-width: 180px;
+  }
+  .panel-code-studio {
+    width: 340px;
+    min-width: 280px;
+  }
+  .panel-inspector {
+    width: 240px;
+    min-width: 200px;
+  }
+}
+
+/* Narrow panes (e.g. a docked side panel): keep the viewport usable above
+   all else - it's the one thing every workflow actually needs to see */
+@media (max-width: 680px) {
+  .panel-pipeline {
+    width: 170px;
+    min-width: 150px;
+  }
+  .panel-code-studio {
+    width: 260px;
+    min-width: 230px;
+  }
+  .panel-inspector {
+    width: 190px;
+    min-width: 170px;
+  }
+  .panel-viewport {
+    min-width: 140px;
   }
 }
 
