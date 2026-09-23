@@ -1351,3 +1351,98 @@ def fit_circle_contour_xld(points: List[Tuple[float, float]]) -> Dict[str, Any]:
         "point_order": point_order
     }
 
+
+def sobel_amp(
+    img: np.ndarray,
+    filter_type: str = "sum_abs",
+    size: int = 3
+) -> np.ndarray:
+    """
+    HALCON sobel_amp 算子:
+    计算 Sobel 一阶导数边缘幅值图像。filter_type 支持 'sum_abs' (|Gx|+|Gy|,
+    默认, 对应 HALCON 'sum_abs'/'thin_sum_abs') 与 'sum_sqrt' (sqrt(Gx^2+Gy^2),
+    对应 'sum_sqrt'/'thin_sum_sqrt')。当前实现不区分细化 (thin_*) 变体。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    ksize = int(size)
+    ksize = ksize + 1 if ksize % 2 == 0 else ksize
+    ksize = max(3, ksize)
+
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=ksize)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=ksize)
+
+    if str(filter_type).lower() in ("sum_sqrt", "thin_sum_sqrt"):
+        amp = cv2.magnitude(gx, gy)
+    else:
+        amp = np.abs(gx) + np.abs(gy)
+
+    return np.clip(amp, 0, 255).astype(np.uint8)
+
+
+def _zhang_suen_thinning(binary_img: np.ndarray, max_iterations: int = 60) -> np.ndarray:
+    """Zhang-Suen 细化算法 (向量化实现): 将二值前景迭代腐蚀为单像素宽度骨架"""
+    img = (binary_img > 0).astype(np.uint8)
+
+    def _neighbours(im: np.ndarray) -> List[np.ndarray]:
+        pad = np.pad(im, 1, mode="constant")
+        p2 = pad[0:-2, 1:-1]
+        p3 = pad[0:-2, 2:]
+        p4 = pad[1:-1, 2:]
+        p5 = pad[2:, 2:]
+        p6 = pad[2:, 1:-1]
+        p7 = pad[2:, 0:-2]
+        p8 = pad[1:-1, 0:-2]
+        p9 = pad[0:-2, 0:-2]
+        return [p2, p3, p4, p5, p6, p7, p8, p9]
+
+    for _ in range(max_iterations):
+        changed = False
+        for step in (0, 1):
+            n = _neighbours(img)
+            seq = n + [n[0]]
+            b_count = sum(n)
+            a_count = sum(((seq[i] == 0) & (seq[i + 1] == 1)).astype(np.uint8) for i in range(8))
+            base = (img == 1) & (b_count >= 2) & (b_count <= 6) & (a_count == 1)
+            if step == 0:
+                cond = base & ((n[0] * n[2] * n[4]) == 0) & ((n[2] * n[4] * n[6]) == 0)
+            else:
+                cond = base & ((n[0] * n[2] * n[6]) == 0) & ((n[0] * n[4] * n[6]) == 0)
+            if np.any(cond):
+                img[cond] = 0
+                changed = True
+        if not changed:
+            break
+    return img
+
+
+def skeleton(region: Region) -> Region:
+    """
+    HALCON skeleton 算子:
+    对 Region 二值掩膜做 Zhang-Suen 细化, 得到单像素宽度的骨架线条。
+    """
+    thinned = _zhang_suen_thinning(region.mask)
+    out_mask = (thinned * 255).astype(np.uint8)
+    return Region(mask=out_mask, objects=[], is_connected=False)
+
+
+def laplace_filter(
+    img: np.ndarray,
+    result: str = "signed",
+    mask_size: int = 3
+) -> np.ndarray:
+    """
+    HALCON laplace 算子:
+    拉普拉斯二阶导数边缘增强滤波。result='abs' 输出边缘强度的绝对值 (0~255),
+    result='signed' (默认) 将正负响应映射到 0~255 区间, 128 代表零响应。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    ksize = int(mask_size)
+    ksize = ksize + 1 if ksize % 2 == 0 else ksize
+    ksize = max(1, ksize)
+
+    lap = cv2.Laplacian(gray, cv2.CV_32F, ksize=ksize)
+
+    if str(result).lower() == "abs":
+        return np.clip(np.abs(lap), 0, 255).astype(np.uint8)
+    return np.clip(lap / 2.0 + 128.0, 0, 255).astype(np.uint8)
+

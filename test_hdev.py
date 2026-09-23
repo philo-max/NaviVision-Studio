@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from core.hdev_engine import HDevParser, HDevInterpreter, HDevTranspiler, HDEV_SIGNATURES
 from core import operators as ops
-from core.types import XLDContour
+from core.types import XLDContour, Region
 from app import app
 
 
@@ -369,6 +369,30 @@ class TestHDevelopEngine(unittest.TestCase):
         # 调试会话已清理, 再次单步应返回 404
         after_stop = self.client.post("/api/hdev/debug/step", headers=headers)
         self.assertEqual(after_stop.status_code, 404)
+
+    def test_13_hdev_sobel_amp_skeleton_laplace(self):
+        """测试新增的 sobel_amp / skeleton / laplace 算子端到端流水线"""
+        script = """
+        read_image (Image, 'pills')
+        sobel_amp (Image, EdgeAmplitude, 'sum_abs', 3)
+        threshold (EdgeAmplitude, Region, 10, 255)
+        skeleton (Region, Skeleton)
+        dev_display (Image)
+        dev_display (Skeleton)
+        laplace (Image, ImageLaplace, 'signed', 3, 'n_8_isotropic')
+        dev_display (ImageLaplace)
+        """
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        self.assertIn("EdgeAmplitude", interpreter.iconic_vars)
+        self.assertIn("Skeleton", interpreter.iconic_vars)
+        self.assertIn("ImageLaplace", interpreter.iconic_vars)
+        self.assertIsInstance(interpreter.iconic_vars["Skeleton"], Region)
+        self.assertEqual(
+            interpreter.iconic_vars["ImageLaplace"].shape[:2],
+            interpreter.iconic_vars["Image"].shape[:2]
+        )
 
 
 if __name__ == "__main__":

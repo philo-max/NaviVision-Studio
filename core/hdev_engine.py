@@ -92,7 +92,10 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "distance_pl": ([], [], ["Row", "Col", "RowBegin", "ColBegin", "RowEnd", "ColEnd"], ["Distance"]),
     "angle_ll": ([], [], ["RowA1", "ColA1", "RowA2", "ColA2", "RowB1", "ColB1", "RowB2", "ColB2"], ["Angle"]),
     "fit_line_contour_xld": (["Contours"], [], ["Algorithm", "MaxNumPoints", "MaxDistance", "ClippingEndPoints"], ["RowBegin", "ColBegin", "RowEnd", "ColEnd", "Nr", "Nc", "Dist"]),
-    "fit_circle_contour_xld": (["Contours"], [], ["Algorithm", "MaxNumPoints", "MaxDistance", "ClippingEndPoints"], ["Row", "Column", "Radius", "StartPhi", "EndPhi", "PointOrder"])
+    "fit_circle_contour_xld": (["Contours"], [], ["Algorithm", "MaxNumPoints", "MaxDistance", "ClippingEndPoints"], ["Row", "Column", "Radius", "StartPhi", "EndPhi", "PointOrder"]),
+    "sobel_amp": (["Image"], ["EdgeAmplitude"], ["FilterType", "Size"], []),
+    "skeleton": (["Region"], ["Skeleton"], [], []),
+    "laplace": (["Image"], ["ImageLaplace"], ["Result", "MaskSize", "FilterMask"], [])
 }
 
 
@@ -980,6 +983,46 @@ class HDevInterpreter:
                 if idx < len(c_out):
                     self.control_vars[c_out[idx]] = [r[key] for r in results]
             self.log(f"  [{inst.line_num}] {op}: 对 {len(contours)} 条轮廓完成最小二乘拟合 -> {c_out}")
+
+        # 21. Sobel 边缘幅值: sobel_amp
+        elif op == "sobel_amp":
+            in_name = i_in[0] if i_in else "Image"
+            out_name = i_out[0] if i_out else "EdgeAmplitude"
+            src = self.iconic_vars.get(in_name)
+            if src is None:
+                raise ValueError(f"未找到输入图像 '{in_name}'")
+            filter_type = str(c_in[0]) if len(c_in) > 0 else "sum_abs"
+            size = int(c_in[1]) if len(c_in) > 1 else 3
+            amp = ops.sobel_amp(src, filter_type=filter_type, size=size)
+            self.iconic_vars[out_name] = amp
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] sobel_amp: 计算 Sobel 边缘幅值图像 ({filter_type}) -> '{out_name}'")
+
+        # 22. 区域骨架细化: skeleton
+        elif op == "skeleton":
+            in_name = i_in[0] if i_in else "Region"
+            out_name = i_out[0] if i_out else "Skeleton"
+            src_reg = self.iconic_vars.get(in_name)
+            if not isinstance(src_reg, Region):
+                raise ValueError(f"输入对象 '{in_name}' 不是有效的 Region")
+            skel = ops.skeleton(src_reg)
+            self.iconic_vars[out_name] = skel
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] skeleton: 完成区域骨架细化 -> '{out_name}'")
+
+        # 23. 拉普拉斯边缘增强: laplace
+        elif op == "laplace":
+            in_name = i_in[0] if i_in else "Image"
+            out_name = i_out[0] if i_out else "ImageLaplace"
+            src = self.iconic_vars.get(in_name)
+            if src is None:
+                raise ValueError(f"未找到输入图像 '{in_name}'")
+            result_type = str(c_in[0]) if len(c_in) > 0 else "signed"
+            mask_size = int(c_in[1]) if len(c_in) > 1 else 3
+            lap = ops.laplace_filter(src, result=result_type, mask_size=mask_size)
+            self.iconic_vars[out_name] = lap
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] laplace: 拉普拉斯滤波完成 ({result_type}) -> '{out_name}'")
 
         else:
             self.log(f"  [{inst.line_num}] 未实现或通用算子 '{op}', 跳过执行")
