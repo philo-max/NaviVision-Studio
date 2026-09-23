@@ -520,12 +520,10 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('navivision:pipeline-synced', (e) => {
     const data = e.detail;
     if (data && data.steps) {
-      pipelineUI.steps = data.steps;
-      pipelineUI.renderSteps();
-      if (data.results) {
-        currentResults = data.results;
-        updateDisplay();
-      }
+      currentResults = data.results || [];
+      pipelineUI.setPipelineData(data.steps, currentResults);
+      updateViewportFromActiveStep();
+      updateObjectTable();
       btnModePipeline.click();
     }
   });
