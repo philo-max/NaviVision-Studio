@@ -34,19 +34,6 @@ class InteractiveCodeEditor {
 
     // HDevelop 经典工业视觉算子模板
     this.hdevTemplates = {
-      "use_current_image": `* ==========================================================
-* NaviVision HDevelop: 直接处理当前工作区图像 (已上传照片或默认样例图)
-* ==========================================================
-* 提示: Image 变量已自动绑定到当前工作区图像, 无需 read_image 重新加载,
-* 否则会用样例图片替换掉你刚上传的照片。直接在下面编写处理逻辑即可。
-
-rgb1_to_gray (Image, GrayImage)
-threshold (GrayImage, Region, 128, 255)
-connection (Region, Connected)
-
-dev_display (Image)
-dev_display (Connected)
-`,
       "homography_rectification": `* ==========================================================
 * NaviVision HDevelop: 倾斜棋盘/条码单应性投影几何矫正
 * ==========================================================
@@ -276,8 +263,7 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
     if (lang === 'hdev') {
       if (tplSelect) {
         tplSelect.innerHTML = `
-          <option value="use_current_image" selected>处理当前工作区图像 (Current Image)</option>
-          <option value="homography_rectification">透视单应性几何矫正 (Rectify)</option>
+          <option value="homography_rectification" selected>透视单应性几何矫正 (Rectify)</option>
           <option value="pills_inspection">药丸完整度质检 (Pills)</option>
           <option value="pcb_subpix">PCB 亚像素边缘提取 (PCB)</option>
           <option value="metal_gears">工件几何度量 (Metal)</option>
@@ -286,8 +272,7 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
       if (varBar) varBar.style.display = 'flex';
       if (syncBtn) syncBtn.style.display = 'inline-flex';
       if (termTitle) termTitle.textContent = '🖥️ HDevelop 4GL 解释执行沙箱控制台';
-      this.loadTemplate('use_current_image');
-      this.logToConsole('🔶 已切换到 HDevelop 4GL 脚本模式，原生支持 HALCON 经典算子与四槽位语法！', 'info');
+      this.logToConsole('🔶 已切换到 HDevelop 4GL 脚本模式，原生支持 HALCON 经典算子与四槽位语法！Image 变量已绑定当前工作区图像，直接编写处理逻辑即可。', 'info');
     } else {
       if (tplSelect) {
         tplSelect.innerHTML = `
