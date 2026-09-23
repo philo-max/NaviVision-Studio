@@ -224,6 +224,29 @@ class HDevParser:
         return [p for p in parts if p]
 
     @classmethod
+    def _has_toplevel_colon(cls, s: str) -> bool:
+        """
+        检测字符串中是否存在不在引号/括号内的顶层冒号, 用于判断是否为四槽位语法。
+        单纯的 ":" in s 会被字符串参数里的内容误判成四槽位语法, 例如 Windows 绝对路径
+        'C:\\Users\\...' 本身就带一个冒号, 从而把整条调用彻底解析错乱。
+        """
+        depth = 0
+        in_quote = None
+        for ch in s:
+            if in_quote:
+                if ch == in_quote:
+                    in_quote = None
+            elif ch in ("'", '"'):
+                in_quote = ch
+            elif ch in ("[", "("):
+                depth += 1
+            elif ch in ("]", ")"):
+                depth -= 1
+            elif ch == ":" and depth == 0:
+                return True
+        return False
+
+    @classmethod
     def parse_line(cls, line: str, line_num: int) -> Optional[HDevInstruction]:
         """解析单行 HDevelop 语句"""
         trimmed = line.strip()
@@ -306,7 +329,7 @@ class HDevParser:
 
         # 检查是否包含冒号 ':' 四槽位语法:
         # op ( IconicIn : IconicOut : ControlIn : ControlOut )
-        if ":" in args_str:
+        if cls._has_toplevel_colon(args_str):
             slots = [s.strip() for s in args_str.split(":")]
             # 补齐 4 个槽位
             while len(slots) < 4:

@@ -411,6 +411,28 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertTrue(res2["success"], f"Execution error: {res2.get('error')}")
         self.assertTrue(np.array_equal(interpreter2.original_snapshot, session_image))
 
+    def test_15_hdev_parser_windows_absolute_path_with_colon(self):
+        """回归测试: Windows 绝对路径 (如 'C:\\...') 自带一个冒号, 曾被 parse_line 的朴素
+        ":" in args_str 检测误判为四槽位语法, 导致 read_image 的变量名与文件路径解析错乱,
+        实际加载的既不是目标文件也不会报错 (静默退化成默认样例图), 非常隐蔽"""
+        self.assertIn(":", self.pills_path, "本测试需要在带盘符冒号的绝对路径环境下运行")
+
+        script = f"read_image (Image, '{self.pills_path}')\ndev_display (Image)"
+        inst = HDevParser.parse_line(f"read_image (Image, '{self.pills_path}')", 1)
+        self.assertEqual(inst.iconic_out, ["Image"])
+        self.assertEqual(inst.control_in, [self.pills_path])
+
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        self.assertIn("Image", interpreter.iconic_vars)
+        self.assertEqual(interpreter.display_target, "Image")
+        # 四槽位语法本身依然要正常工作 (不能因为这个修复而误伤真正的四槽位调用)
+        four_slot = HDevParser.parse_line("threshold (Image : CustomRegion : 100, 200 :)", 1)
+        self.assertEqual(four_slot.iconic_in, ["Image"])
+        self.assertEqual(four_slot.iconic_out, ["CustomRegion"])
+        self.assertEqual(four_slot.control_in, [100, 200])
+
 
 if __name__ == "__main__":
     unittest.main()
