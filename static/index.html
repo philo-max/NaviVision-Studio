@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
-  <link rel="stylesheet" href="/static/css/theme.css">
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260923_compare">
 </head>
 <body>
 
@@ -48,6 +48,9 @@
       </button>
       <button class="mode-btn" id="btnModeCode" title="代码工作台 (HDevelop / Python)">
         <svg class="icon"><use href="#i-code"/></svg><span class="btn-label">代码工作台</span>
+      </button>
+      <button class="btn btn-sm btn-run-prominent" id="btnTopRunScript" style="display:none;margin-left:6px;" title="执行当前代码 (快捷键: Ctrl+Enter)">
+        <svg class="icon"><use href="#i-play"/></svg><span>▶ 运行脚本 (Ctrl+Enter)</span>
       </button>
     </div>
 
@@ -137,25 +140,26 @@
     <!-- 1B. Left Column (Alternative): Live Code Studio Panel (敲代码模式) -->
     <aside class="panel-code-studio" id="panelCodeStudio" style="display:none;">
       <div class="code-studio-toolbar">
-        <label class="field-inline">
-          <span class="field-label">语言</span>
-          <select id="codeLangSelect" class="select-sm">
-            <option value="hdev" selected>🔶 HDevelop 4GL</option>
-            <option value="python">🐍 Python / OpenCV</option>
-          </select>
-        </label>
-        <label class="field-inline">
-          <span class="field-label">模板</span>
-          <select id="codeTemplateSelect" class="select-sm">
-            <!-- 由 code_editor.js 动态填充 -->
-          </select>
-        </label>
-        <button class="btn btn-secondary btn-sm" id="btnSyncToPipeline" title="将当前 HDevelop 脚本转译并同步到可视化流水线">
-          <svg class="icon"><use href="#i-sync"/></svg>转为流水线
-        </button>
-        <button class="btn btn-primary btn-sm" id="btnRunScript">
-          <svg class="icon"><use href="#i-play"/></svg>运行 (Ctrl+Enter)
-        </button>
+        <div class="code-studio-toolbar-row">
+          <label class="field-inline">
+            <span class="field-label" style="font-weight:600;color:var(--text-main);">语言:</span>
+            <select id="codeLangSelect" class="select-sm">
+              <option value="hdev" selected>🔶 HDevelop 4GL</option>
+              <option value="python">🐍 Python / OpenCV</option>
+            </select>
+          </label>
+          <button class="btn btn-secondary btn-sm" id="btnOpenManual" title="查阅全量 HDevelop 4GL 视觉算法算子命令手册">
+            <svg class="icon"><use href="#i-book"/></svg><span>📖 算法命令手册</span>
+          </button>
+        </div>
+        <div class="code-studio-toolbar-row">
+          <button class="btn btn-secondary btn-sm" id="btnSyncToPipeline" title="将当前 HDevelop 脚本转译并同步到可视化流水线">
+            <svg class="icon"><use href="#i-sync"/></svg>转为流水线
+          </button>
+          <button class="btn btn-sm btn-run-prominent" id="btnRunScript" title="快捷键: Ctrl + Enter">
+            <svg class="icon"><use href="#i-play"/></svg>▶ 运行脚本 (Ctrl+Enter)
+          </button>
+        </div>
       </div>
 
       <!-- HDevelop Iconic 变量视口目标监视 -->
@@ -207,6 +211,8 @@
         <button class="icon-btn" id="btnRoiCircle" title="绘制圆形 ROI">◯ 圆</button>
         <button class="icon-btn" id="btnRoiPoly" title="绘制多边形 ROI">⬠ 多边形</button>
         <button class="icon-btn" id="btnRoiClear" title="清除 ROI">✖ 清除ROI</button>
+        <div class="sep"></div>
+        <button class="icon-btn" id="btnToggleCompare" title="并排显示处理前/处理后的图像">🔀 前后对比</button>
       </div>
 
       <!-- 画布舞台 -->
@@ -214,6 +220,16 @@
         <canvas id="imageCanvas" class="canvas-layer"></canvas>
         <canvas id="maskCanvas" class="canvas-layer"></canvas>
         <canvas id="vectorCanvas" class="canvas-layer"></canvas>
+        <div class="compare-view" id="compareView" hidden>
+          <div class="compare-pane">
+            <span class="compare-pane-label">处理前 (Before)</span>
+            <img class="compare-pane-img" id="compareBeforeImg" alt="处理前">
+          </div>
+          <div class="compare-pane">
+            <span class="compare-pane-label">处理后 (After)</span>
+            <img class="compare-pane-img" id="compareAfterImg" alt="处理后">
+          </div>
+        </div>
         <div class="empty-state" id="emptyState">
           <svg class="icon empty-state-icon"><use href="#i-image"/></svg>
           <h2 class="empty-state-title">尚未载入图像</h2>
@@ -351,11 +367,46 @@ for obj in result["objects"]:
     </div>
   </div>
 
+  <!-- 模态框 3: 算法命令手册 (Operator Reference Manual & Cheatsheet) -->
+  <div class="modal-backdrop" id="manualModal">
+    <div class="modal-card modal-card-manual">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <svg class="icon"><use href="#i-book"/></svg>算法命令手册 (HDevelop 4GL / 机器视觉核心算子)
+        </h3>
+        <button class="icon-btn" id="btnCloseManualModal" title="关闭"><svg class="icon"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="manual-toolbar-box">
+        <div class="manual-search-wrapper">
+          <input type="text" id="manualSearchInput" class="input-search" placeholder="🔍 输入算子名称、中文功能或参数关键词进行实时过滤...">
+        </div>
+        <div class="manual-category-pills" id="manualCategoryPills">
+          <button class="cat-pill active" data-cat="all">全部算子</button>
+          <button class="cat-pill" data-cat="io">📷 图像与通道</button>
+          <button class="cat-pill" data-cat="threshold">⚡ 阈值与分割</button>
+          <button class="cat-pill" data-cat="morphology">🔬 形态学滤波</button>
+          <button class="cat-pill" data-cat="measure">📐 几何测量拟合</button>
+          <button class="cat-pill" data-cat="xld">🔍 亚像素XLD</button>
+          <button class="cat-pill" data-cat="homography">🧭 投影单应性</button>
+          <button class="cat-pill" data-cat="display">🖥️ 视口与显示</button>
+        </div>
+      </div>
+      <div class="modal-body manual-modal-body" id="manualCardList">
+        <!-- 由 operator_manual.js 动态渲染 -->
+      </div>
+      <div class="modal-footer">
+        <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-dim);">💡 提示：点击算子卡片上的「➕ 插入到编辑器」可将语法片段写入当前代码光标位置</span>
+        <button class="btn btn-secondary" id="btnCloseManualModalBtn">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JavaScript Modules -->
-  <script src="/static/js/viewport.js"></script>
-  <script src="/static/js/histogram.js"></script>
-  <script src="/static/js/pipeline_ui.js"></script>
-  <script src="/static/js/code_editor.js"></script>
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/viewport.js?v=20260921_run"></script>
+  <script src="/static/js/histogram.js?v=20260921_run"></script>
+  <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
+  <script src="/static/js/code_editor.js?v=20260921_run"></script>
+  <script src="/static/js/operator_manual.js?v=20260923_measure"></script>
+  <script src="/static/js/app.js?v=20260923_compare"></script>
 </body>
 </html>

@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentSamples = [];
   let currentResults = [];
+  let lastCodeRunResult = null;
 
   // 0. 多租户会话 ID 管理
   let sessionId = localStorage.getItem('navivision_session_id');
@@ -304,6 +305,40 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnRoiClear').addEventListener('click', () => {
     viewport.clearRoi(); _setRoiBtn(null);
   });
+
+  // 8c. 前后对比视图: 并排显示"处理前"原始底图与"处理后"最终结果
+  const compareView = document.getElementById('compareView');
+  const compareBeforeImg = document.getElementById('compareBeforeImg');
+  const compareAfterImg = document.getElementById('compareAfterImg');
+  const btnToggleCompare = document.getElementById('btnToggleCompare');
+
+  function refreshCompareView() {
+    let beforeSrc = null;
+    let afterSrc = null;
+    if (lastCodeRunResult) {
+      // 代码工作台模式: 使用脚本执行前后的快照
+      beforeSrc = lastCodeRunResult.original_base64;
+      afterSrc = lastCodeRunResult.preview_base64;
+    } else {
+      // 流水线模式: 使用原始载入图与当前激活步骤的输出
+      const readStepRes = currentResults.find(r => r.operator === 'read_image');
+      const activeRes = pipelineUI.getActiveResult?.();
+      beforeSrc = readStepRes ? readStepRes.preview_base64 : null;
+      afterSrc = activeRes ? (activeRes.preview_base64 || activeRes.mask_base64) : null;
+    }
+    compareBeforeImg.src = beforeSrc || '';
+    compareAfterImg.src = afterSrc || '';
+  }
+
+  if (btnToggleCompare) {
+    btnToggleCompare.addEventListener('click', () => {
+      const willShow = compareView.hidden;
+      if (willShow) refreshCompareView();
+      compareView.hidden = !willShow;
+      btnToggleCompare.classList.toggle('active', willShow);
+    });
+  }
+
   // 多边形: 双击 / Enter 闭合
   viewport.stage.addEventListener('dblclick', () => {
     if (viewport.roiMode === 'polygon') { viewport.finishPolygon(); _setRoiBtn(null); }
@@ -502,6 +537,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const codeEditor = new InteractiveCodeEditor(scriptEditorEl, lineNumbersEl, terminalLogsEl, (result) => {
     // 脚本沙箱返回结果，投射到 Viewport
+    lastCodeRunResult = result;
+    if (!compareView.hidden) refreshCompareView();
     if (result.preview_base64) {
       viewport.renderImage(result.preview_base64);
     }
@@ -540,10 +577,37 @@ document.addEventListener('DOMContentLoaded', () => {
     codeEditor.runScript();
   });
 
-  // 模板切换
-  document.getElementById('codeTemplateSelect').addEventListener('change', (e) => {
-    codeEditor.loadTemplate(e.target.value);
-  });
+  // 算法命令手册初始化与事件绑定
+  const manualModal = document.getElementById('manualModal');
+  const manualManager = new OperatorManualManager(manualModal, codeEditor);
+
+  const btnOpenManual = document.getElementById('btnOpenManual');
+  if (btnOpenManual) {
+    btnOpenManual.addEventListener('click', () => {
+      manualManager.open();
+    });
+  }
+
+  const btnCloseManualModal = document.getElementById('btnCloseManualModal');
+  if (btnCloseManualModal) {
+    btnCloseManualModal.addEventListener('click', () => {
+      manualManager.close();
+    });
+  }
+
+  const btnCloseManualModalBtn = document.getElementById('btnCloseManualModalBtn');
+  if (btnCloseManualModalBtn) {
+    btnCloseManualModalBtn.addEventListener('click', () => {
+      manualManager.close();
+    });
+  }
+
+  const codeTemplateSelect = document.getElementById('codeTemplateSelect');
+  if (codeTemplateSelect) {
+    codeTemplateSelect.addEventListener('change', (e) => {
+      codeEditor.loadTemplate(e.target.value);
+    });
+  }
 
   // 清屏按钮
   document.getElementById('btnClearTerminal').addEventListener('click', () => {
@@ -553,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 模式切换: 流水线 vs 代码工作室
   const btnModePipeline = document.getElementById('btnModePipeline');
   const btnModeCode = document.getElementById('btnModeCode');
+  const btnTopRunScript = document.getElementById('btnTopRunScript');
   const panelPipeline = document.getElementById('panelPipeline');
   const panelCodeStudio = document.getElementById('panelCodeStudio');
 
@@ -561,6 +626,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btnModeCode.classList.remove('active');
     panelPipeline.style.display = 'flex';
     panelCodeStudio.style.display = 'none';
+    if (btnTopRunScript) btnTopRunScript.style.display = 'none';
+    lastCodeRunResult = null;
+    if (!compareView.hidden) refreshCompareView();
   });
 
   btnModeCode.addEventListener('click', () => {
@@ -568,8 +636,16 @@ document.addEventListener('DOMContentLoaded', () => {
     btnModePipeline.classList.remove('active');
     panelPipeline.style.display = 'none';
     panelCodeStudio.style.display = 'flex';
+    if (btnTopRunScript) btnTopRunScript.style.display = 'inline-flex';
     codeEditor.updateLineNumbers();
   });
+
+  if (btnTopRunScript) {
+    btnTopRunScript.addEventListener('click', () => {
+      const btnRun = document.getElementById('btnRunScript');
+      if (btnRun) btnRun.click();
+    });
+  }
 
   // 12. 开放 API 接入中心模态框
   const apiModal = document.getElementById('apiModal');

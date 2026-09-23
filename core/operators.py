@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import math
 import os
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 from core.types import Region, RegionObject, XLDContour
 
 
@@ -1140,3 +1140,214 @@ def onnx_inference(
     else:
         result["values"] = [round(float(v), 5) for v in raw[:64]]
     return result
+
+
+def gen_cross_contour_xld(
+    rows: Union[List[float], float],
+    cols: Union[List[float], float],
+    length: float = 6.0,
+    phi: float = 0.785398
+) -> List[XLDContour]:
+    """
+    HALCON gen_cross_contour_xld 算子:
+    在给定 (Row, Col) 中心点位置生成十字交叉 XLD 矢量轮廓
+    """
+    contours: List[XLDContour] = []
+    if not isinstance(rows, (list, tuple, np.ndarray)):
+        r_list = [rows]
+    else:
+        r_list = list(rows)
+    if not isinstance(cols, (list, tuple, np.ndarray)):
+        c_list = [cols]
+    else:
+        c_list = list(cols)
+
+    cnt_id = 1
+    for r, c in zip(r_list, c_list):
+        r_val, c_val = float(r), float(c)
+        dx1 = length * math.cos(phi)
+        dy1 = length * math.sin(phi)
+        dx2 = length * math.sin(phi)
+        dy2 = -length * math.cos(phi)
+        # points are in [col, row] for canvas viewport
+        arm1 = [[round(c_val - dx1, 2), round(r_val - dy1, 2)], [round(c_val + dx1, 2), round(r_val + dy1, 2)]]
+        arm2 = [[round(c_val - dx2, 2), round(r_val - dy2, 2)], [round(c_val + dx2, 2), round(r_val + dy2, 2)]]
+        contours.append(XLDContour(id=cnt_id, points=arm1, is_closed=False))
+        contours.append(XLDContour(id=cnt_id + 1, points=arm2, is_closed=False))
+        cnt_id += 2
+    return contours
+
+
+def hom_vector_to_proj_hom_mat2d(
+    px: List[float],
+    py: List[float],
+    qx: List[float],
+    qy: List[float],
+    pw: Optional[List[float]] = None,
+    qw: Optional[List[float]] = None,
+    method: str = "normalized_dlt"
+) -> np.ndarray:
+    """
+    HALCON hom_vector_to_proj_hom_mat2d 算子:
+    根据点对对应关系求解 2D 投影变换 (单应性) 矩阵 HomMat2D (3x3)。
+    自动兼容 Row/Col 与 Col/Row 双向坐标表达。
+    """
+    px = [float(v) for v in px]
+    py = [float(v) for v in py]
+    qx = [float(v) for v in qx]
+    qy = [float(v) for v in qy]
+
+    # 判断第一参数是 Row 还是 Col:
+    # 若点0和点1在 qy 相同而 qx 变化，说明 qy 是垂直线(Col), qx 是纵轴(Row)
+    if len(qx) >= 4 and len(qy) >= 4:
+        if abs(qy[0] - qy[1]) < 1e-4 and abs(qx[0] - qx[1]) > 1e-4:
+            src_pts = np.float32([[py[i], px[i]] for i in range(4)])
+            dst_pts = np.float32([[qy[i], qx[i]] for i in range(4)])
+        else:
+            src_pts = np.float32([[px[i], py[i]] for i in range(4)])
+            dst_pts = np.float32([[qx[i], qy[i]] for i in range(4)])
+    else:
+        src_pts = np.float32(list(zip(px, py)))
+        dst_pts = np.float32(list(zip(qx, qy)))
+
+    H = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    return H
+
+
+def projective_trans_image(
+    img: np.ndarray,
+    hom_mat: Union[np.ndarray, List[List[float]], Dict[str, Any]],
+    interpolation: str = "bilinear",
+    adapt_size: bool = False
+) -> np.ndarray:
+    """
+    HALCON projective_trans_image 算子:
+    应用投影变换矩阵对图像进行几何透视矫正
+    """
+    if isinstance(hom_mat, dict) and "matrix" in hom_mat:
+        H = np.array(hom_mat["matrix"], dtype=np.float32)
+    elif isinstance(hom_mat, (list, np.ndarray)):
+        H = np.array(hom_mat, dtype=np.float32)
+    else:
+        raise ValueError(f"无效的投影变换矩阵: {hom_mat}")
+
+    h, w = img.shape[:2]
+    flags = cv2.INTER_LINEAR if "bilinear" in str(interpolation).lower() else cv2.INTER_NEAREST
+    warped = cv2.warpPerspective(img, H, (w, h), flags=flags, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+    return warped
+
+
+def distance_pp(row1: float, col1: float, row2: float, col2: float) -> float:
+    """HALCON distance_pp 算子: 计算两点之间的欧氏距离"""
+    return round(math.hypot(row2 - row1, col2 - col1), 4)
+
+
+def distance_pl(
+    row: float, col: float,
+    row_begin: float, col_begin: float,
+    row_end: float, col_end: float
+) -> float:
+    """
+    HALCON distance_pl 算子:
+    计算点 (Row, Col) 到由两点确定的无限长直线的垂直距离
+    """
+    dr = row_end - row_begin
+    dc = col_end - col_begin
+    line_len = math.hypot(dr, dc)
+    if line_len < 1e-9:
+        return round(math.hypot(row - row_begin, col - col_begin), 4)
+    cross = abs(dr * (col - col_begin) - dc * (row - row_begin))
+    return round(cross / line_len, 4)
+
+
+def angle_ll(
+    row_a1: float, col_a1: float, row_a2: float, col_a2: float,
+    row_b1: float, col_b1: float, row_b2: float, col_b2: float
+) -> float:
+    """
+    HALCON angle_ll 算子:
+    计算直线 A (两点确定) 旋转到直线 B (两点确定) 的夹角,
+    弧度制, 范围 (-pi, pi]
+    """
+    angle_a = math.atan2(col_a2 - col_a1, row_a2 - row_a1)
+    angle_b = math.atan2(col_b2 - col_b1, row_b2 - row_b1)
+    diff = angle_b - angle_a
+    while diff > math.pi:
+        diff -= 2.0 * math.pi
+    while diff <= -math.pi:
+        diff += 2.0 * math.pi
+    return round(diff, 6)
+
+
+def fit_line_contour_xld(points: List[Tuple[float, float]]) -> Dict[str, Any]:
+    """
+    HALCON fit_line_contour_xld 算子 (简化版):
+    对亚像素轮廓点集 [(Row, Col), ...] 做总体最小二乘 (正交回归) 直线拟合,
+    返回拟合线段的起止端点, 以及法线式方程 Nr*Row + Nc*Col = Dist 的系数。
+    说明: 使用 SVD 主方向分解, 未实现 HALCON 原生的 Tukey/Huber 迭代抗差算法。
+    """
+    pts = np.array(points, dtype=np.float64)
+    if len(pts) < 2:
+        raise ValueError("拟合直线至少需要 2 个轮廓点")
+
+    mean = pts.mean(axis=0)
+    centered = pts - mean
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    direction = vt[0]
+    normal = vt[-1]
+    normal = normal / (np.linalg.norm(normal) + 1e-12)
+    dist = float(normal @ mean)
+
+    proj = centered @ direction
+    begin_pt = mean + proj.min() * direction
+    end_pt = mean + proj.max() * direction
+
+    return {
+        "row_begin": round(float(begin_pt[0]), 3),
+        "col_begin": round(float(begin_pt[1]), 3),
+        "row_end": round(float(end_pt[0]), 3),
+        "col_end": round(float(end_pt[1]), 3),
+        "nr": round(float(normal[0]), 6),
+        "nc": round(float(normal[1]), 6),
+        "dist": round(dist, 4)
+    }
+
+
+def fit_circle_contour_xld(points: List[Tuple[float, float]]) -> Dict[str, Any]:
+    """
+    HALCON fit_circle_contour_xld 算子 (简化版):
+    使用 Kåsa 代数最小二乘法, 对亚像素轮廓点集 [(Row, Col), ...] 拟合圆,
+    返回圆心/半径, 以及各轮廓点相对圆心的起止角度范围与绕行方向。
+    """
+    pts = np.array(points, dtype=np.float64)
+    if len(pts) < 3:
+        raise ValueError("拟合圆至少需要 3 个轮廓点")
+
+    r = pts[:, 0]
+    c = pts[:, 1]
+    design = np.column_stack([r, c, np.ones(len(pts))])
+    rhs = r ** 2 + c ** 2
+    sol, *_ = np.linalg.lstsq(design, rhs, rcond=None)
+    a1, a2, a3 = sol
+    center_r = a1 / 2.0
+    center_c = a2 / 2.0
+    radius = math.sqrt(max(a3 + center_r ** 2 + center_c ** 2, 0.0))
+
+    angles = np.arctan2(c - center_c, r - center_r)
+
+    cross_sum = 0.0
+    for i in range(len(pts) - 1):
+        v1 = pts[i] - [center_r, center_c]
+        v2 = pts[i + 1] - [center_r, center_c]
+        cross_sum += v1[0] * v2[1] - v1[1] * v2[0]
+    point_order = "positive" if cross_sum >= 0 else "negative"
+
+    return {
+        "row": round(float(center_r), 3),
+        "col": round(float(center_c), 3),
+        "radius": round(float(radius), 3),
+        "start_phi": round(float(angles.min()), 6),
+        "end_phi": round(float(angles.max()), 6),
+        "point_order": point_order
+    }
+

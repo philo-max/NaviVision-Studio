@@ -1,7 +1,6 @@
 /* ==========================================================================
    NaviVision Studio - Main App Stylesheet
    ========================================================================== */
-@import url('theme.css');
 
 * {
   box-sizing: border-box;
@@ -730,10 +729,13 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* Code Mode Workspace Panel (Replaces or toggles with Pipeline Panel) */
+/* ==========================================================================
+   Code Studio (Interactive Live Sandbox Editor)
+   ========================================================================== */
 .panel-code-studio {
-  width: 440px;
-  min-width: 360px;
+  width: 520px;
+  min-width: 420px;
+  max-width: 700px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border-subtle);
   display: none;
@@ -742,11 +744,53 @@ body {
 
 .code-studio-toolbar {
   padding: 10px 14px;
+  background: var(--bg-panel-elevated);
   border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.code-studio-toolbar-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+}
+
+.code-studio-toolbar-row .field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.btn-run-prominent {
+  background: #10b981 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4) !important;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+.btn-run-prominent:hover {
+  background: #059669 !important;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.7) !important;
+  transform: translateY(-1px);
+}
+.btn-run-prominent svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 .editor-wrapper {
@@ -1083,19 +1127,15 @@ body {
   --chamfer: 6px;
 }
 
-/* Ink header bar with hazard-stripe baseline */
+/* Clean high-tech header baseline */
 .app-header::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 3px;
-  background: repeating-linear-gradient(
-    135deg,
-    var(--mark) 0 6px,
-    var(--ink) 6px 12px
-  );
+  height: 1px;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.05), rgba(56, 189, 248, 0.5) 50%, rgba(56, 189, 248, 0.05));
 }
 
 .app-title {
@@ -1293,3 +1333,257 @@ body {
   line-height: 1.6;
   color: var(--ink-muted);
 }
+
+/* Before/After compare view overlay for the viewport stage */
+.compare-view {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  gap: 1px;
+  background: var(--border-subtle);
+}
+
+.compare-view[hidden] {
+  display: none;
+}
+
+.compare-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+.compare-pane-label {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 4px;
+  color: var(--ink-text);
+  background: var(--bg-panel-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.compare-pane-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+#btnToggleCompare.active {
+  color: var(--accent-on-ink);
+  border-color: var(--accent-on-ink);
+}
+
+/* ==========================================================================
+   Operator Reference Manual Modal Styles
+   ========================================================================== */
+.modal-card-manual {
+  width: 900px;
+  max-width: 94vw;
+  height: 82vh;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.modal-card-manual .modal-header {
+  padding: 14px 20px;
+  background: var(--ink);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.manual-toolbar-box {
+  padding: 12px 20px;
+  background: var(--bg-panel-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manual-search-wrapper .input-search {
+  width: 100%;
+  padding: 9px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 13px;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.manual-search-wrapper .input-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.manual-category-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cat-pill {
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cat-pill:hover {
+  color: var(--text-main);
+  border-color: var(--border-bright);
+}
+
+.cat-pill.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.manual-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-app);
+}
+
+.manual-op-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all var(--transition-fast);
+}
+
+.manual-op-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.op-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.op-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.op-badge-cat {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.op-name {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.op-slots {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.op-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-xs {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.op-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.op-signature-box {
+  background: #04070e;
+  border: 1px solid var(--border-subtle);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #38bdf8;
+  overflow-x: auto;
+}
+
+.op-params-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.op-param-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.op-param-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: #7dd3fc;
+  min-width: 95px;
+}
+
+.op-param-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 85px;
+}
+
+.op-param-desc {
+  color: var(--text-muted);
+}
+

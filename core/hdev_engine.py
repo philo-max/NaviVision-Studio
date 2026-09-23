@@ -59,7 +59,25 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "gen_contour_polygon_xld": (["Contour"], ["Polygons"], ["Type", "MaxDistance"], []),
     "read_barcode": (["Image"], [], [], ["DecodedStrings"]),
     "read_text": (["Image"], [], ["Lang"], ["RecognizedText"]),
-    "calibrate": (["Image"], [], ["PatternWidth", "PatternHeight", "SquareSize"], ["PixelsPerUnit"])
+    "calibrate": (["Image"], [], ["PatternWidth", "PatternHeight", "SquareSize"], ["PixelsPerUnit"]),
+    "gen_cross_contour_xld": ([], ["Crosses"], ["Row", "Col", "Length", "Phi"], []),
+    "hom_vector_to_proj_hom_mat2d": ([], [], ["Px", "Py", "Pw", "Qx", "Qy", "Qw", "Method"], ["HomMat2D"]),
+    "vector_to_proj_hom_mat2d": ([], [], ["Px", "Py", "Qx", "Qy", "Method"], ["HomMat2D"]),
+    "projective_trans_image": (["Image"], ["Image_rectified"], ["HomMat2D", "Interpolation", "AdaptImageSize", "TransformDomain"], []),
+    "projective_trans_image_size": (["Image"], ["Image_rectified"], ["HomMat2D", "Interpolation", "Width", "Height", "TransformDomain"], []),
+    "dev_update_off": ([], [], [], []),
+    "dev_update_on": ([], [], [], []),
+    "dev_close_window": ([], [], [], []),
+    "dev_open_window": ([], [], ["Row", "Column", "Width", "Height", "Background"], ["WindowHandle"]),
+    "dev_open_window_fit_image": (["Image"], [], ["Row", "Column", "WidthLimit", "HeightLimit"], ["WindowHandle"]),
+    "dev_set_color": ([], [], ["ColorName"], []),
+    "dev_set_line_width": ([], [], ["LineWidth"], []),
+    "dev_set_draw": ([], [], ["DrawMode"], []),
+    "distance_pp": ([], [], ["Row1", "Col1", "Row2", "Col2"], ["Distance"]),
+    "distance_pl": ([], [], ["Row", "Col", "RowBegin", "ColBegin", "RowEnd", "ColEnd"], ["Distance"]),
+    "angle_ll": ([], [], ["RowA1", "ColA1", "RowA2", "ColA2", "RowB1", "ColB1", "RowB2", "ColB2"], ["Angle"]),
+    "fit_line_contour_xld": (["Contours"], [], ["Algorithm", "MaxNumPoints", "MaxDistance", "ClippingEndPoints"], ["RowBegin", "ColBegin", "RowEnd", "ColEnd", "Nr", "Nc", "Dist"]),
+    "fit_circle_contour_xld": (["Contours"], [], ["Algorithm", "MaxNumPoints", "MaxDistance", "ClippingEndPoints"], ["Row", "Column", "Radius", "StartPhi", "EndPhi", "PointOrder"])
 }
 
 
@@ -371,10 +389,13 @@ class HDevInterpreter:
         self.stdout: List[str] = []
         # 当前活跃显示目标 (Iconic 变量名)
         self.display_target: Optional[str] = None
+        # 脚本执行前的原始底图快照 (用于前后对比视图), 首次载入后不再变更
+        self.original_snapshot: Optional[np.ndarray] = None
         # 默认底图注入
         if base_image is not None:
             self.iconic_vars["Image"] = base_image
             self.display_target = "Image"
+            self.original_snapshot = base_image.copy()
 
     def log(self, msg: str):
         self.stdout.append(str(msg))
@@ -490,6 +511,8 @@ class HDevInterpreter:
             img = ops.read_image_from_path(resolved_path)
             self.iconic_vars[out_name] = img
             self.display_target = out_name
+            if self.original_snapshot is None:
+                self.original_snapshot = img.copy()
             self.log(f"  [{inst.line_num}] read_image: 载入图像 '{out_name}', shape={img.shape}")
 
         # 2. rgb1_to_gray (Image, GrayImage)
@@ -707,6 +730,105 @@ class HDevInterpreter:
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] gen_contour_polygon_xld: 多边形折线简化 -> '{out_name}'")
 
+        # 15. 十字交叉 XLD 轮廓生成: gen_cross_contour_xld (Crosses, Row, Col, Length, Phi)
+        elif op == "gen_cross_contour_xld":
+            out_name = i_out[0] if i_out else "Crosses"
+            rows = c_in[0] if len(c_in) > 0 else []
+            cols = c_in[1] if len(c_in) > 1 else []
+            length = float(c_in[2]) if len(c_in) > 2 else 6.0
+            phi = float(c_in[3]) if len(c_in) > 3 else 0.785398
+            crosses = ops.gen_cross_contour_xld(rows, cols, length=length, phi=phi)
+            self.iconic_vars[out_name] = crosses
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] gen_cross_contour_xld: 生成 {len(crosses)//2} 组十字交叉标定标记 -> '{out_name}'")
+
+        # 16. 单应性投影矩阵求解: hom_vector_to_proj_hom_mat2d
+        elif op in ("hom_vector_to_proj_hom_mat2d", "vector_to_proj_hom_mat2d"):
+            out_var = c_out[0] if c_out else "HomMat2D"
+            px = c_in[0] if len(c_in) > 0 else []
+            py = c_in[1] if len(c_in) > 1 else []
+            # 跳过 Pw (如果有的话)
+            if op == "hom_vector_to_proj_hom_mat2d" and len(c_in) >= 6:
+                qx = c_in[3]
+                qy = c_in[4]
+                method = str(c_in[6]) if len(c_in) > 6 else "normalized_dlt"
+            else:
+                qx = c_in[2] if len(c_in) > 2 else []
+                qy = c_in[3] if len(c_in) > 3 else []
+                method = str(c_in[4]) if len(c_in) > 4 else "normalized_dlt"
+
+            H = ops.hom_vector_to_proj_hom_mat2d(px, py, qx, qy, method=method)
+            self.control_vars[out_var] = H.tolist()
+            self.log(f"  [{inst.line_num}] {op}: 计算 3x3 投影单应性矩阵 -> {out_var}")
+
+        # 17. 图像投影变换矫正: projective_trans_image
+        elif op in ("projective_trans_image", "projective_trans_image_size"):
+            in_name = i_in[0] if i_in else "Image"
+            out_name = i_out[0] if i_out else "Image_rectified"
+            mat_val = c_in[0] if len(c_in) > 0 else self.control_vars.get("HomMat2D", "HomMat2D")
+            interp = str(c_in[1]) if len(c_in) > 1 else "bilinear"
+            
+            src = self.iconic_vars.get(in_name)
+            if src is None:
+                raise ValueError(f"未找到输入图像 '{in_name}'")
+            
+            rectified = ops.projective_trans_image(src, mat_val, interpolation=interp)
+            self.iconic_vars[out_name] = rectified
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] {op}: 透视矫正完成 -> '{out_name}', 分辨率={rectified.shape}")
+
+        # 18. HALCON 图形窗口与渲染属性控制 (静默无损映射)
+        elif op.startswith("dev_") or op.startswith("set_"):
+            # 记录属性配置
+            if op == "dev_set_color" and c_in:
+                self.control_vars["_draw_color"] = str(c_in[0])
+            elif op == "dev_set_line_width" and c_in:
+                self.control_vars["_line_width"] = float(c_in[0])
+            self.log(f"  [{inst.line_num}] {op}: 图形环境配置更新 {c_in}")
+
+        # 19. 点/直线间距离与夹角测量: distance_pp, distance_pl, angle_ll
+        elif op == "distance_pp":
+            r1, c1, r2, c2 = (float(c_in[i]) for i in range(4))
+            dist = ops.distance_pp(r1, c1, r2, c2)
+            out_var = c_out[0] if c_out else "Distance"
+            self.control_vars[out_var] = dist
+            self.log(f"  [{inst.line_num}] distance_pp: 两点距离 = {dist}")
+
+        elif op == "distance_pl":
+            r, c, rb, cb, re_, ce = (float(c_in[i]) for i in range(6))
+            dist = ops.distance_pl(r, c, rb, cb, re_, ce)
+            out_var = c_out[0] if c_out else "Distance"
+            self.control_vars[out_var] = dist
+            self.log(f"  [{inst.line_num}] distance_pl: 点到直线距离 = {dist}")
+
+        elif op == "angle_ll":
+            vals = [float(c_in[i]) for i in range(8)]
+            angle = ops.angle_ll(*vals)
+            out_var = c_out[0] if c_out else "Angle"
+            self.control_vars[out_var] = angle
+            self.log(f"  [{inst.line_num}] angle_ll: 直线夹角 = {angle} rad")
+
+        # 20. XLD 轮廓最小二乘拟合: fit_line_contour_xld, fit_circle_contour_xld
+        elif op in ("fit_line_contour_xld", "fit_circle_contour_xld"):
+            in_name = i_in[0] if i_in else "Contours"
+            contours = self.iconic_vars.get(in_name)
+            if not contours:
+                raise ValueError(f"未找到输入轮廓 '{in_name}'")
+            if isinstance(contours, XLDContour):
+                contours = [contours]
+
+            if op == "fit_line_contour_xld":
+                keys = ["row_begin", "col_begin", "row_end", "col_end", "nr", "nc", "dist"]
+                results = [ops.fit_line_contour_xld(cnt.points) for cnt in contours]
+            else:
+                keys = ["row", "col", "radius", "start_phi", "end_phi", "point_order"]
+                results = [ops.fit_circle_contour_xld(cnt.points) for cnt in contours]
+
+            for idx, key in enumerate(keys):
+                if idx < len(c_out):
+                    self.control_vars[c_out[idx]] = [r[key] for r in results]
+            self.log(f"  [{inst.line_num}] {op}: 对 {len(contours)} 条轮廓完成最小二乘拟合 -> {c_out}")
+
         else:
             self.log(f"  [{inst.line_num}] 未实现或通用算子 '{op}', 跳过执行")
 
@@ -747,6 +869,7 @@ class HDevInterpreter:
 
         res: Dict[str, Any] = {
             "preview_base64": None,
+            "original_base64": None,
             "mask_base64": None,
             "contours": [],
             "objects": []
@@ -754,6 +877,9 @@ class HDevInterpreter:
 
         if base_img is not None:
             res["preview_base64"] = encode_image_base64(base_img)
+
+        if self.original_snapshot is not None:
+            res["original_base64"] = encode_image_base64(self.original_snapshot)
 
         # 检查当前目标
         target = self.iconic_vars.get(self.display_target) if self.display_target else None

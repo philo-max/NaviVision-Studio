@@ -17,6 +17,38 @@ class InteractiveCodeEditor {
 
     // HDevelop 经典工业视觉算子模板
     this.hdevTemplates = {
+      "homography_rectification": `* ==========================================================
+* NaviVision HDevelop: 倾斜棋盘/条码单应性投影几何矫正
+* ==========================================================
+dev_update_off ()
+dev_close_window ()
+
+read_image (Image, '4-3.png')
+dev_open_window_fit_image (Image, 0, 0, -1, -1, WindowHandle)
+
+dev_set_color ('red')
+dev_set_line_width (2)
+
+* 原图四个角点坐标 (Row, Col)
+X := [163, 280, 362, 75]
+Y := [125, 120, 361, 340]
+
+gen_cross_contour_xld (Crosses, X, Y, 6, 0.78)
+dev_display (Image)
+dev_display (Crosses)
+
+* 目标校正后的四个角点
+QX := [75, 360, 360, 75]
+QY := [110, 110, 360, 360]
+
+* 求解单应性投影矩阵
+hom_vector_to_proj_hom_mat2d (X, Y, [1,1,1,1], QX, QY, [1,1,1,1], 'normalized_dlt', HomMat2D)
+
+* 投影变换矫正图像
+projective_trans_image (Image, Image_rectified, HomMat2D, 'bilinear', 'false', 'false')
+
+dev_display (Image_rectified)
+`,
       "pills_inspection": `* ==========================================================
 * NaviVision HDevelop: 药板药丸瑕疵与完整度检测
 * ==========================================================
@@ -211,27 +243,29 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
     const syncBtn = document.getElementById('btnSyncToPipeline');
     const termTitle = document.getElementById('terminalTitle');
 
-    if (!tplSelect) return;
-    tplSelect.innerHTML = '';
-
     if (lang === 'hdev') {
-      tplSelect.innerHTML = `
-        <option value="pills_inspection">药丸完整度质检 (Pills)</option>
-        <option value="pcb_subpix">PCB 亚像素边缘提取 (PCB)</option>
-        <option value="metal_gears">工件几何度量 (Metal)</option>
-      `;
+      if (tplSelect) {
+        tplSelect.innerHTML = `
+          <option value="homography_rectification" selected>透视单应性几何矫正 (Rectify)</option>
+          <option value="pills_inspection">药丸完整度质检 (Pills)</option>
+          <option value="pcb_subpix">PCB 亚像素边缘提取 (PCB)</option>
+          <option value="metal_gears">工件几何度量 (Metal)</option>
+        `;
+      }
       if (varBar) varBar.style.display = 'flex';
       if (syncBtn) syncBtn.style.display = 'inline-flex';
       if (termTitle) termTitle.textContent = '🖥️ HDevelop 4GL 解释执行沙箱控制台';
-      this.loadTemplate('pills_inspection');
+      this.loadTemplate('homography_rectification');
       this.logToConsole('🔶 已切换到 HDevelop 4GL 脚本模式，原生支持 HALCON 经典算子与四槽位语法！', 'info');
     } else {
-      tplSelect.innerHTML = `
-        <option value="sobel">Sobel 梯度自定二值化</option>
-        <option value="contours">Canny 矢量轮廓提取</option>
-        <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
-        <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
-      `;
+      if (tplSelect) {
+        tplSelect.innerHTML = `
+          <option value="sobel">Sobel 梯度自定二值化</option>
+          <option value="contours">Canny 矢量轮廓提取</option>
+          <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
+          <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
+        `;
+      }
       if (varBar) varBar.style.display = 'none';
       if (syncBtn) syncBtn.style.display = 'none';
       if (termTitle) termTitle.textContent = '🖥️ Python 3.12 沙箱终端控制台';

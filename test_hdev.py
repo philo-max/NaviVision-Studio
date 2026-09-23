@@ -6,12 +6,14 @@ NaviVision Studio - HDevelop DSL Engine Test Suite
 import unittest
 import os
 import sys
+import math
 import numpy as np
 from pathlib import Path
 from fastapi.testclient import TestClient
 
 from core.hdev_engine import HDevParser, HDevInterpreter, HDevTranspiler, HDEV_SIGNATURES
 from core import operators as ops
+from core.types import XLDContour
 from app import app
 
 
@@ -180,14 +182,77 @@ class TestHDevelopEngine(unittest.TestCase):
 
         # 4. 上传 .hdev 文件接口: POST /api/hdev/upload
         dummy_hdev = b"read_image (Image, 'pills')\nthreshold (Image, R, 128, 255)"
-        resp = self.client.post(
+        resp_upload = self.client.post(
             "/api/hdev/upload",
             files={"file": ("test_script.hdev", dummy_hdev, "application/octet-stream")}
         )
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertTrue(data["success"])
-        self.assertEqual(data["instruction_count"], 2)
+        self.assertEqual(resp_upload.status_code, 200)
+        data = resp_upload.json()
+        self.assertTrue(resp_upload.json()["success"])
+        self.assertIn("threshold (", resp_upload.json()["code"])
+
+    def test_07_hdev_projective_rectification(self):
+        """测试透视矫正与单应性矩阵求解完整流程 (hom_vector_to_proj_hom_mat2d + projective_trans_image)"""
+        script = """
+        read_image (Image, '4-3.png')
+        X := [163, 280, 362, 75]
+        Y := [125, 120, 361, 340]
+        gen_cross_contour_xld (Crosses, X, Y, 6, 0.78)
+        QX := [75, 360, 360, 75]
+        QY := [110, 110, 360, 360]
+        hom_vector_to_proj_hom_mat2d (X, Y, [1,1,1,1], QX, QY, [1,1,1,1], 'normalized_dlt', HomMat2D)
+        projective_trans_image (Image, Image_rectified, HomMat2D, 'bilinear', 'false', 'false')
+        dev_display (Image_rectified)
+        """
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        self.assertIn("Image_rectified", interpreter.iconic_vars)
+        self.assertIn("HomMat2D", interpreter.control_vars)
+        self.assertEqual(interpreter.display_target, "Image_rectified")
+        self.assertIsNotNone(res.get("preview_base64"))
+        rectified_img = interpreter.iconic_vars["Image_rectified"]
+        self.assertEqual(rectified_img.shape, (500, 500, 3))
+
+    def test_08_hdev_distance_angle_operators(self):
+        """测试点线距离与直线夹角测量算子 (distance_pp / distance_pl / angle_ll)"""
+        script = """
+        distance_pp (0, 0, 3, 4, Dpp)
+        distance_pl (5, 0, 0, 0, 0, 10, Dpl)
+        angle_ll (0, 0, 0, 10, 0, 0, 10, 10, Ang)
+        """
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        self.assertAlmostEqual(interpreter.control_vars["Dpp"], 5.0, places=3)
+        self.assertAlmostEqual(interpreter.control_vars["Dpl"], 5.0, places=3)
+        self.assertAlmostEqual(interpreter.control_vars["Ang"], -math.pi / 4, places=3)
+
+    def test_09_hdev_fit_line_and_circle_contour_xld(self):
+        """测试 XLD 轮廓最小二乘拟合算子 (fit_line_contour_xld / fit_circle_contour_xld)"""
+        interpreter = HDevInterpreter()
+        interpreter.iconic_vars["LineContours"] = [
+            XLDContour(id=1, points=[(2.0, 0.0), (2.0, 5.0), (2.0, 10.0)])
+        ]
+        center_r, center_c, radius = 10.0, 10.0, 5.0
+        circle_pts = [
+            (center_r + radius * math.sin(t), center_c + radius * math.cos(t))
+            for t in np.linspace(0, 2 * math.pi, 24, endpoint=False)
+        ]
+        interpreter.iconic_vars["CircleContours"] = [XLDContour(id=1, points=circle_pts)]
+
+        script = """
+        fit_line_contour_xld (LineContours, 'tukey', -1, 5, 'false', RowBegin, ColBegin, RowEnd, ColEnd, Nr, Nc, Dist)
+        fit_circle_contour_xld (CircleContours, 'atukey', -1, 3, 'false', Row, Column, Radius, StartPhi, EndPhi, PointOrder)
+        """
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+
+        self.assertAlmostEqual(abs(interpreter.control_vars["Nr"][0]), 1.0, places=2)
+        self.assertAlmostEqual(abs(interpreter.control_vars["Dist"][0]), 2.0, places=1)
+        self.assertAlmostEqual(interpreter.control_vars["Row"][0], center_r, places=1)
+        self.assertAlmostEqual(interpreter.control_vars["Column"][0], center_c, places=1)
+        self.assertAlmostEqual(interpreter.control_vars["Radius"][0], radius, places=1)
 
 
 if __name__ == "__main__":
