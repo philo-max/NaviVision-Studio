@@ -458,11 +458,21 @@ const OPERATOR_MANUAL_DATA = [
     categoryName: "视口与显示",
     signature: "dev_display (Object)",
     slots: "(Object : : :)",
-    description: "指定将哪个 Iconic 对象（底图、彩色掩膜 Region 或 XLD 亚像素轮廓）作为画布的主视口渲染目标。",
+    description: "在图形窗口中显示 Iconic 对象，遵循 HALCON 叠加语义：显示图像会重绘整个画布并清空之前的叠加层，而显示 Region 掩膜或 XLD 轮廓则叠加绘制在当前画布之上，可连续调用多次以同时显示底图+多个 Region+多条轮廓。",
     params: [
-      { name: "Object", type: "Iconic (In)", desc: "要在画布上高亮显示的图像或几何变量名" }
+      { name: "Object", type: "Iconic (In)", desc: "要叠加显示的图像 / Region / XLD 轮廓变量名" }
     ],
-    snippet: "dev_display (Image_rectified)\n"
+    snippet: "dev_display (Image)\ndev_display (Region)\n"
+  },
+  {
+    name: "dev_clear_window",
+    category: "display",
+    categoryName: "视口与显示",
+    signature: "dev_clear_window ()",
+    slots: "(: : :)",
+    description: "清空当前图形窗口累积的所有叠加层（底图与已显示的 Region/XLD），常用于在下一轮显示前重置画布。",
+    params: [],
+    snippet: "dev_clear_window ()\n"
   },
   {
     name: "dev_open_window_fit_image",

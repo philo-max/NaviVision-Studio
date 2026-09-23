@@ -254,6 +254,39 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertAlmostEqual(interpreter.control_vars["Column"][0], center_c, places=1)
         self.assertAlmostEqual(interpreter.control_vars["Radius"][0], radius, places=1)
 
+    def test_10_hdev_dev_display_overlay_semantics(self):
+        """测试 dev_display 图形窗口叠加语义: 同一窗口内 Image + Region + XLD 应同时叠加显示"""
+        script = """
+        read_image (Image, 'pills')
+        threshold (Image, BrightRegion, 180, 255)
+        connection (BrightRegion, Connected)
+        gen_cross_contour_xld (Marks, [10, 20], [10, 20], 5, 0.5)
+        dev_display (Image)
+        dev_display (Connected)
+        dev_display (Marks)
+        """
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        # 三层应同时可见: 底图 + Region 掩膜 + XLD 轮廓, 而不是互相覆盖只剩最后一个
+        self.assertIsNotNone(res["preview_base64"])
+        self.assertIsNotNone(res["mask_base64"])
+        self.assertTrue(len(res["contours"]) > 0)
+
+        # dev_clear_window 应清空 Region/XLD 叠加层
+        interpreter2 = HDevInterpreter()
+        res2 = interpreter2.execute_script(script + "\ndev_clear_window ()\n")
+        self.assertTrue(res2["success"], f"Execution error: {res2.get('error')}")
+        self.assertIsNone(res2["mask_base64"])
+        self.assertEqual(res2["contours"], [])
+
+        # 重新显示一张新图像应重绘画布, 清空之前叠加的 Region/XLD
+        interpreter3 = HDevInterpreter()
+        res3 = interpreter3.execute_script(script + "\nread_image (Image2, 'pills')\ndev_display (Image2)\n")
+        self.assertTrue(res3["success"], f"Execution error: {res3.get('error')}")
+        self.assertIsNone(res3["mask_base64"])
+        self.assertEqual(res3["contours"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -68,6 +68,7 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "dev_update_off": ([], [], [], []),
     "dev_update_on": ([], [], [], []),
     "dev_close_window": ([], [], [], []),
+    "dev_clear_window": ([], [], [], []),
     "dev_open_window": ([], [], ["Row", "Column", "Width", "Height", "Background"], ["WindowHandle"]),
     "dev_open_window_fit_image": (["Image"], [], ["Row", "Column", "WidthLimit", "HeightLimit"], ["WindowHandle"]),
     "dev_set_color": ([], [], ["ColorName"], []),
@@ -391,10 +392,18 @@ class HDevInterpreter:
         self.display_target: Optional[str] = None
         # 脚本执行前的原始底图快照 (用于前后对比视图), 首次载入后不再变更
         self.original_snapshot: Optional[np.ndarray] = None
+        # HALCON dev_display 叠加语义模拟: 显示图像会重绘整个画布并清空叠加层,
+        # 而 Region/XLD 的显示则在当前画布上叠加绘制, 直到下次显示新图像或 dev_clear_window
+        self.display_image_name: Optional[str] = None
+        self.display_region_names: List[str] = []
+        self.display_xld_names: List[str] = []
+        # 脚本中是否显式调用过 dev_display/disp_obj (决定渲染走叠加模式还是单目标覆盖模式)
+        self.explicit_display_used: bool = False
         # 默认底图注入
         if base_image is not None:
             self.iconic_vars["Image"] = base_image
             self.display_target = "Image"
+            self.display_image_name = "Image"
             self.original_snapshot = base_image.copy()
 
     def log(self, msg: str):
@@ -702,12 +711,34 @@ class HDevInterpreter:
             self.control_vars[out_var] = count
             self.log(f"  [{inst.line_num}] count_obj: 目标数量 = {count} -> {out_var}")
 
-        # 12. dev_display / disp_obj (Object)
+        # 12. dev_display / disp_obj (Object): 模拟 HALCON 图形窗口叠加语义
         elif op in ("dev_display", "disp_obj"):
             in_name = i_in[0] if i_in else "Object"
-            if in_name in self.iconic_vars:
+            obj = self.iconic_vars.get(in_name)
+            if obj is not None:
+                self.explicit_display_used = True
                 self.display_target = in_name
-                self.log(f"  [{inst.line_num}] {op}: 将 '{in_name}' 设为中心画布渲染目标")
+                if isinstance(obj, np.ndarray):
+                    # 显示新图像 = 整个画布被重绘, 之前叠加的 Region/XLD 不再可见
+                    self.display_image_name = in_name
+                    self.display_region_names = []
+                    self.display_xld_names = []
+                    self.log(f"  [{inst.line_num}] {op}: 显示图像 '{in_name}' (画布重绘, 叠加层已清空)")
+                elif isinstance(obj, Region):
+                    if in_name not in self.display_region_names:
+                        self.display_region_names.append(in_name)
+                    self.log(f"  [{inst.line_num}] {op}: 叠加显示 Region '{in_name}' (当前叠加层: {self.display_region_names})")
+                elif isinstance(obj, list) and obj and isinstance(obj[0], XLDContour):
+                    if in_name not in self.display_xld_names:
+                        self.display_xld_names.append(in_name)
+                    self.log(f"  [{inst.line_num}] {op}: 叠加显示 XLD 轮廓 '{in_name}' (当前叠加层: {self.display_xld_names})")
+
+        # 12b. dev_clear_window: 清空当前图形窗口的所有叠加层
+        elif op == "dev_clear_window":
+            self.display_image_name = None
+            self.display_region_names = []
+            self.display_xld_names = []
+            self.log(f"  [{inst.line_num}] dev_clear_window: 已清空画布叠加层")
 
         # 13. 色彩空间转换: rgb_to_hsv, hsv_threshold
         elif op == "rgb_to_hsv":
@@ -859,7 +890,74 @@ class HDevInterpreter:
         return out
 
     def _build_visualization_payload(self) -> Dict[str, Any]:
-        """为 Web 端 Canvas Viewport 打包当前指定目标的渲染数据"""
+        """为 Web 端 Canvas Viewport 打包当前渲染数据"""
+        if self.explicit_display_used:
+            return self._build_layered_visualization_payload()
+        return self._build_single_target_visualization_payload()
+
+    def _build_layered_visualization_payload(self) -> Dict[str, Any]:
+        """
+        叠加模式 (脚本中显式调用过 dev_display/disp_obj 时启用):
+        模拟 HALCON 图形窗口语义 —— 当前显示的图像作为画布底图,
+        其后所有仍处于叠加状态的 Region/XLD 依次叠加绘制在其上。
+        """
+        res: Dict[str, Any] = {
+            "preview_base64": None,
+            "original_base64": None,
+            "mask_base64": None,
+            "contours": [],
+            "objects": []
+        }
+
+        if self.original_snapshot is not None:
+            res["original_base64"] = encode_image_base64(self.original_snapshot)
+
+        base_img = self.iconic_vars.get(self.display_image_name) if self.display_image_name else None
+        if base_img is None:
+            for v in self.iconic_vars.values():
+                if isinstance(v, np.ndarray):
+                    base_img = v
+                    break
+        if base_img is not None:
+            res["preview_base64"] = encode_image_base64(base_img)
+
+        merged_mask = None
+        all_objects: List[Dict[str, Any]] = []
+        for name in self.display_region_names:
+            reg = self.iconic_vars.get(name)
+            if not isinstance(reg, Region) or base_img is None:
+                continue
+            color_mask = create_colored_label_mask(reg, base_img.shape[:2])
+            if merged_mask is None:
+                merged_mask = color_mask
+            else:
+                covered = np.any(color_mask > 0, axis=-1)
+                merged_mask[covered] = color_mask[covered]
+            all_objects.extend([
+                {
+                    "id": obj.id,
+                    "area": obj.area,
+                    "circularity": obj.circularity,
+                    "centroid": [round(x, 1) for x in obj.centroid],
+                    "bbox": list(obj.bbox)
+                }
+                for obj in reg.objects
+            ])
+        if merged_mask is not None:
+            res["mask_base64"] = encode_image_base64(merged_mask)
+            res["objects"] = all_objects
+
+        all_contours: List[List[Tuple[float, float]]] = []
+        for name in self.display_xld_names:
+            xld_list = self.iconic_vars.get(name)
+            if isinstance(xld_list, list):
+                all_contours.extend([c.points for c in xld_list if isinstance(c, XLDContour)])
+        res["contours"] = all_contours
+
+        return res
+
+    def _build_single_target_visualization_payload(self) -> Dict[str, Any]:
+        """单目标覆盖模式 (脚本未显式调用 dev_display 时的默认兼容行为): 仅渲染最近一次产出的对象"""
         # 寻找底图
         base_img = None
         for v in self.iconic_vars.values():
