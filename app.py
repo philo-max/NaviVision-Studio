@@ -10,6 +10,7 @@ import time
 import re
 import csv
 import json
+import threading
 from pathlib import Path
 import cv2
 import numpy as np
@@ -412,6 +413,96 @@ async def run_hdev_script(request: Request, req: HDevRunRequest):
         interpreter.display_target = req.display_target
     res = interpreter.execute_script(req.code, timeout_sec=3.0)
     return JSONResponse(content=res)
+
+
+# --- HDevelop 单步调试 / 断点续跑 / 变量监视器 ---
+class _DebugSessionRegistry:
+    """按 Session ID 隔离的 HDevelop 单步调试会话池 (纯内存态, 空闲超时后自动回收)"""
+
+    def __init__(self, max_idle_seconds: float = 1800.0):
+        self._sessions: Dict[str, HDevInterpreter] = {}
+        self._last_active: Dict[str, float] = {}
+        self._lock = threading.Lock()
+        self.max_idle_seconds = max_idle_seconds
+
+    def start(self, sid: str, interpreter: HDevInterpreter) -> None:
+        with self._lock:
+            self._cleanup_expired()
+            self._sessions[sid] = interpreter
+            self._last_active[sid] = time.time()
+
+    def get(self, sid: str) -> Optional[HDevInterpreter]:
+        with self._lock:
+            self._cleanup_expired()
+            if sid in self._sessions:
+                self._last_active[sid] = time.time()
+            return self._sessions.get(sid)
+
+    def stop(self, sid: str) -> bool:
+        with self._lock:
+            existed = sid in self._sessions
+            self._sessions.pop(sid, None)
+            self._last_active.pop(sid, None)
+            return existed
+
+    def _cleanup_expired(self) -> None:
+        now = time.time()
+        expired = [sid for sid, t in self._last_active.items() if now - t > self.max_idle_seconds]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+            self._last_active.pop(sid, None)
+
+
+_debug_sessions = _DebugSessionRegistry()
+
+
+class HDevDebugStartRequest(BaseModel):
+    code: str
+
+
+class HDevDebugContinueRequest(BaseModel):
+    breakpoints: Optional[List[int]] = None
+
+
+@app.post("/api/hdev/debug/start")
+async def hdev_debug_start(request: Request, req: HDevDebugStartRequest):
+    """启动一个 HDevelop 单步调试会话: 解析脚本并暂停在第一条指令之前"""
+    pipeline = get_pipeline(request)
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = HDevInterpreter(base_image=pipeline.source_image, session_id=sid)
+    res = interpreter.load_script(req.code)
+    _debug_sessions.start(sid, interpreter)
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/debug/step")
+async def hdev_debug_step(request: Request):
+    """单步调试: 执行当前待执行的一条指令后暂停, 返回执行后的变量与画面快照"""
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = _debug_sessions.get(sid)
+    if interpreter is None:
+        raise HTTPException(status_code=404, detail="调试会话不存在或已过期, 请先调用 /api/hdev/debug/start")
+    res = interpreter.step_once()
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/debug/continue")
+async def hdev_debug_continue(request: Request, req: HDevDebugContinueRequest = Body(default=HDevDebugContinueRequest())):
+    """断点续跑: 从当前指令持续执行直到命中断点行号或脚本结束"""
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = _debug_sessions.get(sid)
+    if interpreter is None:
+        raise HTTPException(status_code=404, detail="调试会话不存在或已过期, 请先调用 /api/hdev/debug/start")
+    res = interpreter.continue_run(breakpoints=req.breakpoints)
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/debug/stop")
+async def hdev_debug_stop(request: Request):
+    """终止并清理当前 HDevelop 调试会话"""
+    sid = request.headers.get("X-Session-ID") or "default"
+    _debug_sessions.stop(sid)
+    return JSONResponse(content={"success": True})
 
 
 @app.post("/api/hdev/to_pipeline")

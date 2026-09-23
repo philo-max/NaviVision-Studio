@@ -414,6 +414,9 @@ class HDevInterpreter:
         self._next_window_handle: int = 1
         # 脚本中是否显式调用过 dev_display/disp_obj/dev_open_window (决定渲染走叠加模式还是单目标覆盖模式)
         self.explicit_display_used: bool = False
+        # 单步调试执行指针: 已解析的指令序列与当前待执行指令下标 (由 load_script 填充)
+        self.instructions: List[HDevInstruction] = []
+        self.pc: int = 0
         # 默认底图注入 (注意: 不标记窗口 0 为"已使用", 否则会在多窗口场景下
         # 被误判为脚本主动打开的窗口而出现在窗口切换标签页里; 各窗口合成画面时
         # 仍会在找不到自己专属底图时回退取用这张预注入的图像, 见 _composite_window)
@@ -446,13 +449,23 @@ class HDevInterpreter:
         except Exception:
             return s
 
+    def _run_single_instruction(self, inst: HDevInstruction) -> None:
+        """执行单条指令 (赋值语句或算子调用), 不负责 pc 步进与异常捕获, 供整段执行与单步调试共用"""
+        if inst.op_type == "assign":
+            val = self._eval_expr(inst.assign_expr)
+            self.control_vars[inst.assign_var] = val
+            self.log(f"  [{inst.line_num}] {inst.assign_var} := {val}")
+        elif inst.op_type == "operator":
+            self._execute_operator(inst)
+        # for/while/if 与其他类型: 当前实现仅顺序跳步, 无需额外处理
+
     def execute_script(self, script_content: str, timeout_sec: float = 3.0) -> Dict[str, Any]:
         """执行完整 HDevelop 脚本"""
         t0 = time.perf_counter()
         instructions = HDevParser.parse_script(script_content)
-        
+
         self.log(f"[*] HDevelop 解释器启动: 共载入 {len(instructions)} 条指令")
-        
+
         pc = 0
         total_inst = len(instructions)
         start_time = time.time()
@@ -464,23 +477,8 @@ class HDevInterpreter:
                     raise TimeoutError(f"HDevelop 脚本执行超时 (强制熔断阈值: {timeout_sec:.1f}s)")
 
                 inst = instructions[pc]
-                
-                # 处理控制流
-                if inst.op_type == "assign":
-                    val = self._eval_expr(inst.assign_expr)
-                    self.control_vars[inst.assign_var] = val
-                    self.log(f"  [{inst.line_num}] {inst.assign_var} := {val}")
-                    pc += 1
-
-                elif inst.op_type == "operator":
-                    self._execute_operator(inst)
-                    pc += 1
-
-                elif inst.op_type in ("for", "while", "if"):
-                    # 基础跳步处理 (简单块顺序推进)
-                    pc += 1
-                else:
-                    pc += 1
+                self._run_single_instruction(inst)
+                pc += 1
 
             duration_ms = round((time.perf_counter() - t0) * 1000.0, 2)
             self.log(f"[✓] 脚本执行完毕，耗时 {duration_ms} ms")
@@ -509,6 +507,76 @@ class HDevInterpreter:
                 "iconic_vars": self._list_iconic_vars(),
                 "control_vars": {k: str(v) for k, v in self.control_vars.items()}
             }
+
+    # ------------------------------------------------------------------
+    # 单步调试 / 断点续跑 / 变量监视器: 与 execute_script 共用 _run_single_instruction,
+    # 但把 pc 步进暴露为可持久化的解释器状态, 供服务端跨请求保持调试会话
+    # ------------------------------------------------------------------
+    def load_script(self, script_content: str) -> Dict[str, Any]:
+        """解析脚本并重置单步调试执行指针, 返回初始调试状态快照 (尚未执行任何指令)"""
+        self.instructions = HDevParser.parse_script(script_content)
+        self.pc = 0
+        self.log(f"[*] 调试会话已加载脚本: 共 {len(self.instructions)} 条指令")
+        return self._debug_status(finished=len(self.instructions) == 0, stopped_reason="ready")
+
+    def _debug_status(self, finished: bool, error: Optional[str] = None, stopped_reason: str = "step") -> Dict[str, Any]:
+        """打包单步/断点调试当前状态快照 (下一条待执行指令 + 变量表 + 画面), 供前端调试面板渲染"""
+        next_inst = self.instructions[self.pc] if self.pc < len(self.instructions) else None
+        render_res = self._build_visualization_payload()
+        return {
+            "success": error is None,
+            "error": error,
+            "finished": finished,
+            "stopped_reason": stopped_reason,
+            "pc": self.pc,
+            "total_instructions": len(self.instructions),
+            "current_line": next_inst.line_num if next_inst else None,
+            "current_raw_line": next_inst.raw_line if next_inst else None,
+            "stdout": "\n".join(self.stdout),
+            "iconic_vars": self._list_iconic_vars(),
+            "control_vars": {k: str(v) for k, v in self.control_vars.items()},
+            "display_target": self.display_target,
+            **render_res
+        }
+
+    def step_once(self) -> Dict[str, Any]:
+        """单步调试: 执行 pc 指向的一条指令后立即暂停, 返回执行后的状态快照"""
+        if self.pc >= len(self.instructions):
+            return self._debug_status(finished=True, stopped_reason="finished")
+
+        inst = self.instructions[self.pc]
+        try:
+            self._run_single_instruction(inst)
+            self.pc += 1
+            finished = self.pc >= len(self.instructions)
+            return self._debug_status(finished=finished, stopped_reason="finished" if finished else "step")
+        except Exception as e:
+            err_msg = f"第 {inst.line_num} 行执行失败: {e}"
+            self.log(f"[!] {err_msg}")
+            return self._debug_status(finished=True, error=err_msg, stopped_reason="error")
+
+    def continue_run(self, breakpoints: Optional[List[int]] = None, max_steps: int = 500) -> Dict[str, Any]:
+        """
+        断点续跑: 从当前 pc 持续单步执行, 直到命中断点行号 / 脚本结束 / 出错 / 达到步数上限。
+        当前 pc 所在指令自身不受断点拦截 (保证从断点处再次 continue 时脚本总能向前推进)。
+        """
+        bp_set = set(breakpoints or [])
+        steps_taken = 0
+        while self.pc < len(self.instructions) and steps_taken < max_steps:
+            inst = self.instructions[self.pc]
+            if steps_taken > 0 and inst.line_num in bp_set:
+                return self._debug_status(finished=False, stopped_reason="breakpoint")
+            try:
+                self._run_single_instruction(inst)
+                self.pc += 1
+                steps_taken += 1
+            except Exception as e:
+                err_msg = f"第 {inst.line_num} 行执行失败: {e}"
+                self.log(f"[!] {err_msg}")
+                return self._debug_status(finished=True, error=err_msg, stopped_reason="error")
+
+        finished = self.pc >= len(self.instructions)
+        return self._debug_status(finished=finished, stopped_reason="finished" if finished else "max_steps")
 
     def _execute_operator(self, inst: HDevInstruction):
         """执行单个算子调用"""

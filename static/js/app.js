@@ -582,6 +582,20 @@ document.addEventListener('DOMContentLoaded', () => {
     codeEditor.runScript();
   });
 
+  // 单步调试控制按钮: 开始 / 单步 / 继续(断点) / 停止
+  document.getElementById('btnDebugStart').addEventListener('click', () => {
+    codeEditor.debugStart();
+  });
+  document.getElementById('btnDebugStep').addEventListener('click', () => {
+    codeEditor.debugStep();
+  });
+  document.getElementById('btnDebugContinue').addEventListener('click', () => {
+    codeEditor.debugContinue();
+  });
+  document.getElementById('btnDebugStop').addEventListener('click', () => {
+    codeEditor.debugStop();
+  });
+
   // 算法命令手册初始化与事件绑定
   const manualModal = document.getElementById('manualModal');
   const manualManager = new OperatorManualManager(manualModal, codeEditor);

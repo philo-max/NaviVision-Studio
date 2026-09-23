@@ -321,6 +321,55 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertTrue(res_closed["success"], f"Execution error: {res_closed.get('error')}")
         self.assertEqual(interpreter.active_window, win_b)
 
+    def test_12_hdev_debug_step_and_breakpoints(self):
+        """测试 HDevelop 单步调试会话: start / step / continue(断点) / stop 全流程"""
+        code = "\n".join([
+            "read_image (Image, 'pills')",
+            "threshold (Image, BrightRegion, 180, 255)",
+            "connection (BrightRegion, Connected)",
+            "count_obj (Connected, N)",
+        ])
+        headers = {"X-Session-ID": "debug-test-session"}
+
+        start_res = self.client.post("/api/hdev/debug/start", json={"code": code}, headers=headers)
+        self.assertEqual(start_res.status_code, 200)
+        data = start_res.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["stopped_reason"], "ready")
+        self.assertEqual(data["pc"], 0)
+        self.assertEqual(data["total_instructions"], 4)
+        self.assertEqual(data["current_line"], 1)
+        # 调试会话复用了当前流水线会话已载入的底图, 但脚本自身尚未执行任何指令
+        self.assertFalse(any(v["name"] == "BrightRegion" for v in data["iconic_vars"]))
+
+        step1 = self.client.post("/api/hdev/debug/step", headers=headers).json()
+        self.assertTrue(step1["success"])
+        self.assertEqual(step1["pc"], 1)
+        self.assertEqual(step1["stopped_reason"], "step")
+        self.assertEqual(step1["current_line"], 2)
+        self.assertTrue(any(v["name"] == "Image" for v in step1["iconic_vars"]))
+
+        # 断点续跑到第 3 行 (connection 执行前暂停)
+        cont_res = self.client.post("/api/hdev/debug/continue", json={"breakpoints": [3]}, headers=headers).json()
+        self.assertTrue(cont_res["success"])
+        self.assertEqual(cont_res["stopped_reason"], "breakpoint")
+        self.assertEqual(cont_res["current_line"], 3)
+        self.assertTrue(any(v["name"] == "BrightRegion" for v in cont_res["iconic_vars"]))
+        self.assertFalse(any(v["name"] == "Connected" for v in cont_res["iconic_vars"]))
+
+        # 继续跑完剩余指令
+        final_res = self.client.post("/api/hdev/debug/continue", json={}, headers=headers).json()
+        self.assertTrue(final_res["success"])
+        self.assertTrue(final_res["finished"])
+        self.assertIn("N", final_res["control_vars"])
+
+        stop_res = self.client.post("/api/hdev/debug/stop", headers=headers).json()
+        self.assertTrue(stop_res["success"])
+
+        # 调试会话已清理, 再次单步应返回 404
+        after_stop = self.client.post("/api/hdev/debug/step", headers=headers)
+        self.assertEqual(after_stop.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

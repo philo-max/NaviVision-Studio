@@ -15,6 +15,23 @@ class InteractiveCodeEditor {
     this.currentDisplayTarget = null;
     this.lastHDevResult = null;
 
+    // 单步调试状态: 断点行号集合、当前暂停行、调试会话是否激活、已打印到终端的日志长度
+    this.breakpoints = new Set();
+    this.debugCurrentLine = null;
+    this.debugActive = false;
+    this.debugLoggedStdoutLen = 0;
+    this.lineNumbers.addEventListener('click', (e) => {
+      const target = e.target.closest('[data-line]');
+      if (!target) return;
+      const line = parseInt(target.dataset.line, 10);
+      if (this.breakpoints.has(line)) {
+        this.breakpoints.delete(line);
+      } else {
+        this.breakpoints.add(line);
+      }
+      this.updateLineNumbers();
+    });
+
     // HDevelop 经典工业视觉算子模板
     this.hdevTemplates = {
       "homography_rectification": `* ==========================================================
@@ -278,7 +295,10 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
     const lines = this.editor.value.split('\n').length;
     let numbersHtml = '';
     for (let i = 1; i <= lines; i++) {
-      numbersHtml += `<div>${i}</div>`;
+      const cls = ['line-num-item'];
+      if (this.breakpoints.has(i)) cls.push('has-breakpoint');
+      if (this.debugCurrentLine === i) cls.push('is-current-line');
+      numbersHtml += `<div class="${cls.join(' ')}" data-line="${i}" title="点击切换断点">${i}</div>`;
     }
     this.lineNumbers.innerHTML = numbersHtml;
   }
@@ -378,6 +398,157 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
         }
       }
     }
+  }
+
+  // ------------------------------------------------------------------
+  // 单步调试 / 断点续跑 / 变量监视器
+  // ------------------------------------------------------------------
+  _debugSessionId() {
+    return localStorage.getItem('navivision_session_id') || 'default';
+  }
+
+  _setDebugButtonsState({ canStart, canStep, canContinue, canStop }) {
+    const btnStart = document.getElementById('btnDebugStart');
+    const btnStep = document.getElementById('btnDebugStep');
+    const btnContinue = document.getElementById('btnDebugContinue');
+    const btnStop = document.getElementById('btnDebugStop');
+    if (btnStart) btnStart.disabled = !canStart;
+    if (btnStep) btnStep.disabled = !canStep;
+    if (btnContinue) btnContinue.disabled = !canContinue;
+    if (btnStop) btnStop.disabled = !canStop;
+  }
+
+  async debugStart() {
+    if (this.currentLang !== 'hdev') {
+      this.logToConsole('⚠️ 单步调试目前仅支持 HDevelop 4GL 脚本', 'error');
+      return;
+    }
+    const code = this.editor.value;
+    this.debugLoggedStdoutLen = 0;
+    this.logToConsole('🐞 正在启动单步调试会话...', 'info');
+    try {
+      const resp = await fetch('/api/hdev/debug/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-ID': this._debugSessionId() },
+        body: JSON.stringify({ code })
+      });
+      const data = await resp.json();
+      this.debugActive = true;
+      document.getElementById('debugWatchPanel').style.display = 'block';
+      this._setDebugButtonsState({ canStart: false, canStep: true, canContinue: true, canStop: true });
+      this._handleDebugState(data);
+    } catch (err) {
+      this.logToConsole(`[网络异常] 启动调试会话失败: ${err}`, 'error');
+    }
+  }
+
+  async debugStep() {
+    try {
+      const resp = await fetch('/api/hdev/debug/step', {
+        method: 'POST',
+        headers: { 'X-Session-ID': this._debugSessionId() }
+      });
+      if (resp.status === 404) {
+        this.logToConsole('⚠️ 调试会话不存在或已过期，请重新点击"开始调试"', 'error');
+        this._onDebugEnded();
+        return;
+      }
+      const data = await resp.json();
+      this._handleDebugState(data);
+    } catch (err) {
+      this.logToConsole(`[网络异常] 单步执行失败: ${err}`, 'error');
+    }
+  }
+
+  async debugContinue() {
+    try {
+      const resp = await fetch('/api/hdev/debug/continue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-ID': this._debugSessionId() },
+        body: JSON.stringify({ breakpoints: Array.from(this.breakpoints) })
+      });
+      if (resp.status === 404) {
+        this.logToConsole('⚠️ 调试会话不存在或已过期，请重新点击"开始调试"', 'error');
+        this._onDebugEnded();
+        return;
+      }
+      const data = await resp.json();
+      this._handleDebugState(data);
+    } catch (err) {
+      this.logToConsole(`[网络异常] 继续执行失败: ${err}`, 'error');
+    }
+  }
+
+  async debugStop() {
+    try {
+      await fetch('/api/hdev/debug/stop', {
+        method: 'POST',
+        headers: { 'X-Session-ID': this._debugSessionId() }
+      });
+    } catch (err) {
+      // 静默忽略网络异常, 前端状态仍需清理
+    }
+    this.logToConsole('🛑 调试会话已终止', 'info');
+    this._onDebugEnded();
+  }
+
+  _onDebugEnded() {
+    this.debugActive = false;
+    this.debugCurrentLine = null;
+    this.updateLineNumbers();
+    this.renderWatchTable({});
+    this._setDebugButtonsState({ canStart: true, canStep: false, canContinue: false, canStop: false });
+    const hint = document.getElementById('debugStatusLabel');
+    if (hint) hint.textContent = '';
+  }
+
+  _handleDebugState(data) {
+    // 增量打印本次新增的解释器日志, 避免每次调用都重复刷屏全量 stdout
+    const fullStdout = data.stdout || '';
+    const newText = fullStdout.slice(this.debugLoggedStdoutLen);
+    this.debugLoggedStdoutLen = fullStdout.length;
+    if (newText.trim()) {
+      this.logToConsole(newText.replace(/\n+$/, ''), data.success === false ? 'error' : 'meta');
+    }
+
+    this.debugCurrentLine = data.current_line || null;
+    this.updateLineNumbers();
+    this.renderWatchTable(data.control_vars || {});
+    this.renderIconicVarPills(data.iconic_vars || [], data.display_target);
+    this.renderWindowPills(data.windows || []);
+
+    const reasonText = {
+      ready: `✅ 调试就绪，共 ${data.total_instructions} 条指令，暂停于第 ${data.current_line} 行`,
+      step: `⏭️ 已执行 1 条指令，暂停于第 ${data.current_line ?? '末尾'} 行`,
+      breakpoint: `🔴 命中断点，暂停于第 ${data.current_line} 行`,
+      max_steps: '⚠️ 已达单次续跑步数上限，暂停执行',
+      finished: '🏁 脚本执行完毕',
+      error: `❌ 第 ${data.current_line ?? '?'} 行执行出错`
+    }[data.stopped_reason] || '';
+    if (reasonText) this.logToConsole(reasonText, data.stopped_reason === 'error' ? 'error' : 'success');
+
+    const hint = document.getElementById('debugStatusLabel');
+    if (hint) hint.textContent = reasonText;
+
+    if (typeof this.onResult === 'function') {
+      this.onResult(data);
+    }
+
+    if (data.finished) {
+      this._setDebugButtonsState({ canStart: true, canStep: false, canContinue: false, canStop: false });
+    }
+  }
+
+  renderWatchTable(controlVars) {
+    const body = document.getElementById('debugWatchBody');
+    if (!body) return;
+    const entries = Object.entries(controlVars || {});
+    if (entries.length === 0) {
+      body.innerHTML = '<tr><td colspan="2" style="color:var(--text-muted);font-style:italic;">暂无控制变量</td></tr>';
+      return;
+    }
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    body.innerHTML = entries.map(([k, v]) => `<tr><td style="color:var(--neon-cyan);">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
   }
 
   renderIconicVarPills(vars, activeTarget) {

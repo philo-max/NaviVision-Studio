@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
-  <link rel="stylesheet" href="/static/css/style.css?v=20260923_compare">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260923_debug">
 </head>
 <body>
 
@@ -160,6 +160,21 @@
             <svg class="icon"><use href="#i-play"/></svg>▶ 运行脚本 (Ctrl+Enter)
           </button>
         </div>
+        <div class="code-studio-toolbar-row" id="debugToolbarRow">
+          <button class="btn btn-secondary btn-sm" id="btnDebugStart" title="解析脚本并暂停在第一条指令之前, 点击行号可切换断点">
+            🐞 开始调试
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnDebugStep" title="单步执行下一条指令" disabled>
+            ⏭ 单步
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnDebugContinue" title="持续执行直到命中断点或脚本结束" disabled>
+            ⏩ 继续
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnDebugStop" title="终止当前调试会话" disabled>
+            ⏹ 停止
+          </button>
+          <span id="debugStatusLabel" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
+        </div>
       </div>
 
       <!-- HDevelop Iconic 变量视口目标监视 -->
@@ -174,6 +189,17 @@
       <div id="hdevWindowBar" style="display:none;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-panel-elevated);border-bottom:1px solid var(--border-subtle);font-size:11px;">
         <span style="color:var(--text-muted);white-space:nowrap;font-weight:600;">🪟 图形窗口:</span>
         <div id="hdevWindowPills" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
+      </div>
+
+      <!-- 单步调试变量监视器 (仅调试会话激活时显示) -->
+      <div id="debugWatchPanel" class="debug-watch-panel" style="display:none;">
+        <div class="debug-watch-header">🔍 变量监视器 <span id="debugWatchHint" style="font-weight:normal;color:var(--text-muted);"></span></div>
+        <table class="debug-watch-table">
+          <thead><tr><th>Control 变量</th><th>当前值</th></tr></thead>
+          <tbody id="debugWatchBody">
+            <tr><td colspan="2" style="color:var(--text-muted);font-style:italic;">尚未开始调试</td></tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- 代码输入区与行号 -->
@@ -411,8 +437,8 @@ for obj in result["objects"]:
   <script src="/static/js/viewport.js?v=20260921_run"></script>
   <script src="/static/js/histogram.js?v=20260921_run"></script>
   <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
-  <script src="/static/js/code_editor.js?v=20260923_windows"></script>
+  <script src="/static/js/code_editor.js?v=20260923_debug"></script>
   <script src="/static/js/operator_manual.js?v=20260923_overlay"></script>
-  <script src="/static/js/app.js?v=20260923_windows"></script>
+  <script src="/static/js/app.js?v=20260923_debug"></script>
 </body>
 </html>
