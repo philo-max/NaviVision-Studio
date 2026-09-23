@@ -619,13 +619,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const codeTemplateSelect = document.getElementById('codeTemplateSelect');
-  if (codeTemplateSelect) {
-    codeTemplateSelect.addEventListener('change', (e) => {
-      codeEditor.loadTemplate(e.target.value);
-    });
-  }
-
   // 清屏按钮
   document.getElementById('btnClearTerminal').addEventListener('click', () => {
     codeEditor.clearConsole();

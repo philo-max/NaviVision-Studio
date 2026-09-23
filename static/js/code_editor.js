@@ -32,156 +32,6 @@ class InteractiveCodeEditor {
       this.updateLineNumbers();
     });
 
-    // HDevelop 经典工业视觉算子模板
-    this.hdevTemplates = {
-      "homography_rectification": `* ==========================================================
-* NaviVision HDevelop: 倾斜棋盘/条码单应性投影几何矫正
-* ==========================================================
-dev_update_off ()
-dev_close_window ()
-
-read_image (Image, '4-3.png')
-dev_open_window_fit_image (Image, 0, 0, -1, -1, WindowHandle)
-
-dev_set_color ('red')
-dev_set_line_width (2)
-
-* 原图四个角点坐标 (Row, Col)
-X := [163, 280, 362, 75]
-Y := [125, 120, 361, 340]
-
-gen_cross_contour_xld (Crosses, X, Y, 6, 0.78)
-dev_display (Image)
-dev_display (Crosses)
-
-* 目标校正后的四个角点
-QX := [75, 360, 360, 75]
-QY := [110, 110, 360, 360]
-
-* 求解单应性投影矩阵
-hom_vector_to_proj_hom_mat2d (X, Y, [1,1,1,1], QX, QY, [1,1,1,1], 'normalized_dlt', HomMat2D)
-
-* 投影变换矫正图像
-projective_trans_image (Image, Image_rectified, HomMat2D, 'bilinear', 'false', 'false')
-
-dev_display (Image_rectified)
-`,
-      "pills_inspection": `* ==========================================================
-* NaviVision HDevelop: 药板药丸瑕疵与完整度检测
-* ==========================================================
-read_image (Image, 'pills')
-rgb1_to_gray (Image, GrayImage)
-threshold (GrayImage, BrightRegions, 180, 255)
-connection (BrightRegions, ConnectedRegions)
-select_shape (ConnectedRegions, SelectedPills, 'area', 'and', 1000, 3000)
-count_obj (SelectedPills, PillCount)
-smallest_rectangle2 (SelectedPills, Rows, Cols, Phis, L1, L2)
-dev_display (SelectedPills)
-`,
-      "pcb_subpix": `* ==========================================================
-* NaviVision HDevelop: PCB 芯片引脚与亚像素边缘提取
-* ==========================================================
-read_image (Image, 'pcb')
-rgb1_to_gray (Image, GrayImage)
-gauss_filter (GrayImage, FilteredImage, 5)
-edges_subpix (FilteredImage, Edges, 'canny', 1.0, 40, 100)
-threshold (GrayImage, SolderPads, 160, 255)
-closing_circle (SolderPads, ClosedPads, 3)
-dev_display (Edges)
-`,
-      "metal_gears": `* ==========================================================
-* NaviVision HDevelop: 工业工件与垫圈几何度量
-* ==========================================================
-read_image (Image, 'metal_parts')
-rgb1_to_gray (Image, GrayImage)
-binary_threshold (GrayImage, Parts, 'max_separability', 'dark', UsedThreshold)
-connection (Parts, ConnectedParts)
-select_shape (ConnectedParts, Gears, 'area', 'and', 2000, 50000)
-smallest_circle (Gears, CenterRows, CenterCols, Radii)
-dev_display (Gears)
-`
-    };
-
-    // Python / OpenCV 算法模板
-    this.pythonTemplates = {
-      "sobel": `import cv2
-import numpy as np
-
-# 1. 计算 Sobel 边缘梯度
-grad_x = cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3)
-grad_y = cv2.Sobel(gray, cv2.CV_16S, 0, 1, ksize=3)
-abs_grad_x = cv2.convertScaleAbs(grad_x)
-abs_grad_y = cv2.convertScaleAbs(grad_y)
-grad = cv2.addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0)
-
-# 2. 对梯度进行大津法自适应二值化
-_, result_mask = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-# 3. 闭运算桥接边缘断裂
-kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-result_mask = cv2.morphologyEx(result_mask, cv2.MORPH_CLOSE, kernel)
-
-print(f"[Sobel Gradient] Active edge pixels: {np.count_nonzero(result_mask)}")
-print("[Info] 自定义算子计算完毕，结果已投射到中心画布！")
-`,
-      "contours": `import cv2
-import numpy as np
-
-# 提取 Canny 边缘与高精度轮廓
-blurred = cv2.GaussianBlur(gray, (5, 5), 1.2)
-edges = cv2.Canny(blurred, 50, 150)
-contours, hierarchy = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-print(f"[Contour Extractor] 提取到 {len(contours)} 条独立多边形轮廓")
-result_contours = contours
-`,
-      "ai_yolo": `import requests
-import json
-import cv2
-import numpy as np
-
-# 模拟或调用外部工业 YOLOv8 目标检测服务
-print("[AI API] 正在打包当前帧图像，发起 HTTP REST 请求...")
-
-success, encoded = cv2.imencode(".jpg", image)
-img_bytes = encoded.tobytes()
-
-print("[AI API] 检测服务响应成功: 耗时 18.2ms")
-detections = [
-    {"class": "defect_chip", "confidence": 0.94, "bbox": [120, 140, 60, 60]},
-    {"class": "solder_pin", "confidence": 0.98, "bbox": [280, 210, 40, 30]}
-]
-
-result_image = image.copy()
-for det in detections:
-    x, y, w, h = det["bbox"]
-    label = f"{det['class']} {det['confidence']*100:.1f}%"
-    cv2.rectangle(result_image, (x, y), (x + w, y + h), (0, 50, 255), 2)
-    cv2.putText(result_image, label, (x, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 50, 255), 2)
-    print(f"  -> 识别目标: {label} @ [{x}, {y}, {w}, {h}]")
-`,
-      "ollama_vlm": `import requests
-import json
-import base64
-import cv2
-
-print("[Ollama VLM] 连接本地多模态大模型 API (http://localhost:11434/api/generate)...")
-
-_, buf = cv2.imencode('.jpg', image)
-b64_str = base64.b64encode(buf).decode('utf-8')
-
-payload = {
-    "model": "llava:latest",
-    "prompt": "请识别并描述图中的工业零部件是否存在外观缺陷或缺失？",
-    "images": [b64_str],
-    "stream": False
-}
-
-print("[Ollama VLM] 提示词: '检测工件缺陷与缺失'")
-print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片，其中第 8 位置药片缺失，第 12 位置药片边缘存在机械破损。建议剔除！")
-`
-    };
-
     this.initEvents();
     this.updateLanguageUI('hdev');
   }
@@ -220,14 +70,6 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
       });
     }
 
-    // 模板选择下拉框
-    const tplSelect = document.getElementById('codeTemplateSelect');
-    if (tplSelect) {
-      tplSelect.addEventListener('change', (e) => {
-        this.loadTemplate(e.target.value);
-      });
-    }
-
     // 运行按钮
     const runBtn = document.getElementById('btnRunScript');
     if (runBtn) {
@@ -255,37 +97,19 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
 
   updateLanguageUI(lang) {
     this.currentLang = lang;
-    const tplSelect = document.getElementById('codeTemplateSelect');
     const varBar = document.getElementById('hdevVarBar');
     const syncBtn = document.getElementById('btnSyncToPipeline');
     const termTitle = document.getElementById('terminalTitle');
 
     if (lang === 'hdev') {
-      if (tplSelect) {
-        tplSelect.innerHTML = `
-          <option value="homography_rectification" selected>透视单应性几何矫正 (Rectify)</option>
-          <option value="pills_inspection">药丸完整度质检 (Pills)</option>
-          <option value="pcb_subpix">PCB 亚像素边缘提取 (PCB)</option>
-          <option value="metal_gears">工件几何度量 (Metal)</option>
-        `;
-      }
       if (varBar) varBar.style.display = 'flex';
       if (syncBtn) syncBtn.style.display = 'inline-flex';
       if (termTitle) termTitle.textContent = '🖥️ HDevelop 4GL 解释执行沙箱控制台';
       this.logToConsole('🔶 已切换到 HDevelop 4GL 脚本模式，原生支持 HALCON 经典算子与四槽位语法！Image 变量已绑定当前工作区图像，直接编写处理逻辑即可。', 'info');
     } else {
-      if (tplSelect) {
-        tplSelect.innerHTML = `
-          <option value="sobel">Sobel 梯度自定二值化</option>
-          <option value="contours">Canny 矢量轮廓提取</option>
-          <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
-          <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
-        `;
-      }
       if (varBar) varBar.style.display = 'none';
       if (syncBtn) syncBtn.style.display = 'none';
       if (termTitle) termTitle.textContent = '🖥️ Python 3.12 沙箱终端控制台';
-      this.loadTemplate('sobel');
       this.logToConsole('🐍 已切换到 Python 脚本模式，支持 cv2 / numpy 独立脚本！', 'info');
     }
   }
@@ -300,14 +124,6 @@ print("-> [模拟大模型分析结论]: 视野内检测到 14 枚圆形药片�
       numbersHtml += `<div class="${cls.join(' ')}" data-line="${i}" title="点击切换断点">${i}</div>`;
     }
     this.lineNumbers.innerHTML = numbersHtml;
-  }
-
-  loadTemplate(tplKey) {
-    const pool = this.currentLang === 'hdev' ? this.hdevTemplates : this.pythonTemplates;
-    if (pool[tplKey]) {
-      this.editor.value = pool[tplKey];
-      this.updateLineNumbers();
-    }
   }
 
   async runScript() {
