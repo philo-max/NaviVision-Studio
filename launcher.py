@@ -16,8 +16,11 @@ from pathlib import Path
 
 APP_TITLE = "NaviVision Studio"
 PREFERRED_PORT = 8080
-WINDOW_SIZE = (1440, 900)
+WINDOW_FALLBACK_SIZE = (1600, 960)
 WINDOW_MIN_SIZE = (1024, 680)
+WINDOW_SCREEN_RATIO = 0.9
+WINDOW_CLAMP_MIN = (1280, 800)
+WINDOW_CLAMP_MAX = (2200, 1300)
 SERVER_START_TIMEOUT_S = 20.0
 SERVER_POLL_INTERVAL_S = 0.05
 LOG_DIR_NAME = "NaviVisionStudio"
@@ -66,6 +69,20 @@ def start_server(port: int):
     return server
 
 
+def default_window_size(webview) -> tuple:
+    """窗口取主屏幕的 WINDOW_SCREEN_RATIO, 并限制在合理范围内; 取不到屏幕信息时用固定值"""
+    try:
+        screen = webview.screens[0]
+        width = int(screen.width * WINDOW_SCREEN_RATIO)
+        height = int(screen.height * WINDOW_SCREEN_RATIO)
+    except Exception:
+        return WINDOW_FALLBACK_SIZE
+    return (
+        max(WINDOW_CLAMP_MIN[0], min(WINDOW_CLAMP_MAX[0], width)),
+        max(WINDOW_CLAMP_MIN[1], min(WINDOW_CLAMP_MAX[1], height)),
+    )
+
+
 def main() -> None:
     if "--script-worker" in sys.argv:
         from core.script_worker import main as run_script_worker
@@ -82,11 +99,12 @@ def main() -> None:
     port = pick_port()
     server = start_server(port)
     webview.settings["ALLOW_DOWNLOADS"] = True
+    width, height = default_window_size(webview)
     webview.create_window(
         APP_TITLE,
         f"http://127.0.0.1:{port}",
-        width=WINDOW_SIZE[0],
-        height=WINDOW_SIZE[1],
+        width=width,
+        height=height,
         min_size=WINDOW_MIN_SIZE,
     )
     try:
