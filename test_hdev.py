@@ -434,5 +434,34 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertEqual(four_slot.control_in, [100, 200])
 
 
+    def test_ocr_social_card_reference_script(self):
+        """实训一参考程序: 阈值 -> 连通域 -> 面积筛选 -> OCR 识别 -> disp_message 显示在图上"""
+        card_path = str(self.project_root / "samples" / "social_card.png").replace("\\", "/")
+        script = f"""
+        dev_open_window (0, 0, 512, 512, 'black', WindowHandle)
+        read_image (Image, '{card_path}')
+        threshold (Image, Region, 0, 10)
+        connection (Region, ConnectedRegions)
+        select_shape (ConnectedRegions, SelectedRegions, 'area', 'and', 30, 200)
+        read_ocr_class_mlp ('Industrial_A-Z+_Rej.omc', OCRHandle)
+        do_ocr_multi_class_mlp (SelectedRegions, Image, OCRHandle, Class, Confidence)
+        A:=Class
+        disp_message (WindowHandle, A, 'window', 12, 12, 'black', 'true')
+        """
+        interpreter = HDevInterpreter()
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        self.assertEqual("".join(interpreter.control_vars["Class"]), "44030120020815123X")
+        self.assertEqual(len(interpreter.control_vars["Confidence"]), 18)
+        self.assertEqual(interpreter._cur_win().messages[0]["text"], "44030120020815123X")
+
+    def test_disp_message_cleared_by_dev_clear_window(self):
+        interpreter = HDevInterpreter(base_image=np.full((64, 64, 3), 200, dtype=np.uint8))
+        interpreter.execute_script("dev_open_window (0, 0, 64, 64, 'black', W)\ndisp_message (W, 'hi', 'window', 5, 5, 'red', 'true')")
+        self.assertEqual(len(interpreter._cur_win().messages), 1)
+        interpreter.execute_script("dev_clear_window ()")
+        self.assertEqual(interpreter._cur_win().messages, [])
+
+
 if __name__ == "__main__":
     unittest.main()

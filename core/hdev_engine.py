@@ -14,10 +14,12 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
+import cv2
 import numpy as np
 
 from core.types import Region, RegionObject, XLDContour
 from core import operators as ops
+from core import ocr_digits
 from core.pipeline import encode_image_base64, create_colored_label_mask
 
 
@@ -28,9 +30,49 @@ class _WindowState:
     image_name: Optional[str] = None
     region_names: List[str] = field(default_factory=list)
     xld_names: List[str] = field(default_factory=list)
+    messages: List[Dict[str, Any]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return self.image_name is None and not self.region_names and not self.xld_names
+        return self.image_name is None and not self.region_names and not self.xld_names and not self.messages
+
+
+MESSAGE_COLORS_BGR: Dict[str, Tuple[int, int, int]] = {
+    "black": (0, 0, 0), "white": (255, 255, 255), "red": (0, 0, 255), "green": (0, 160, 0),
+    "blue": (255, 0, 0), "yellow": (0, 255, 255), "cyan": (255, 255, 0), "magenta": (255, 0, 255),
+    "orange": (0, 140, 255), "gray": (128, 128, 128),
+}
+MESSAGE_BASE_FONT_PX = 18
+MESSAGE_BOX_PADDING = 4
+MESSAGE_LINE_SPACING = 1.3
+MESSAGE_DARK_BOX_BGR = (40, 40, 40)
+MESSAGE_LIGHT_BOX_BGR = (235, 235, 235)
+MESSAGE_LUMA_THRESHOLD = 128
+
+
+def _draw_messages(img: np.ndarray, messages: List[Dict[str, Any]]) -> np.ndarray:
+    """将 disp_message 记录的文字叠加绘制到图像副本上 (行/列为图像像素坐标, 文字左上角对齐)"""
+    if not messages:
+        return img
+    canvas = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
+    scale = max(1.0, canvas.shape[1] / 512.0)
+    font_scale = MESSAGE_BASE_FONT_PX / 30.0 * scale
+    thickness = max(1, int(round(scale)))
+    for msg in messages:
+        lines = str(msg["text"]).split("\n")
+        color = MESSAGE_COLORS_BGR.get(str(msg["color"]).lower(), MESSAGE_COLORS_BGR["black"])
+        sizes = [cv2.getTextSize(ln, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0] for ln in lines]
+        line_h = int(max(s[1] for s in sizes) * MESSAGE_LINE_SPACING) + 2
+        x0, y0 = int(msg["col"]), int(msg["row"])
+        pad = MESSAGE_BOX_PADDING
+        if msg["box"]:
+            luma = 0.114 * color[0] + 0.587 * color[1] + 0.299 * color[2]
+            box_color = MESSAGE_LIGHT_BOX_BGR if luma < MESSAGE_LUMA_THRESHOLD else MESSAGE_DARK_BOX_BGR
+            box_w = max(s[0] for s in sizes) + 2 * pad
+            cv2.rectangle(canvas, (x0, y0), (x0 + box_w, y0 + line_h * len(lines) + pad), box_color, -1)
+        for i, ln in enumerate(lines):
+            cv2.putText(canvas, ln, (x0 + pad, y0 + line_h * (i + 1) - 2), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, color, thickness, cv2.LINE_AA)
+    return canvas
 
 
 # ----------------------------------------------------------------------
@@ -78,6 +120,9 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "vector_to_proj_hom_mat2d": ([], [], ["Px", "Py", "Qx", "Qy", "Method"], ["HomMat2D"]),
     "projective_trans_image": (["Image"], ["Image_rectified"], ["HomMat2D", "Interpolation", "AdaptImageSize", "TransformDomain"], []),
     "projective_trans_image_size": (["Image"], ["Image_rectified"], ["HomMat2D", "Interpolation", "Width", "Height", "TransformDomain"], []),
+    "read_ocr_class_mlp": ([], [], ["FileName"], ["OCRHandle"]),
+    "do_ocr_multi_class_mlp": (["Character", "Image"], [], ["OCRHandle"], ["Class", "Confidence"]),
+    "disp_message": ([], [], ["WindowHandle", "String", "CoordSystem", "Row", "Column", "Color", "Box"], []),
     "dev_update_off": ([], [], [], []),
     "dev_update_on": ([], [], [], []),
     "dev_close_window": ([], [], [], []),
@@ -846,6 +891,7 @@ class HDevInterpreter:
                     win.image_name = in_name
                     win.region_names = []
                     win.xld_names = []
+                    win.messages = []
                     self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 显示图像 '{in_name}' (画布重绘, 叠加层已清空)")
                 elif isinstance(obj, Region):
                     if in_name not in win.region_names:
@@ -862,6 +908,7 @@ class HDevInterpreter:
             win.image_name = None
             win.region_names = []
             win.xld_names = []
+            win.messages = []
             self.log(f"  [{inst.line_num}] dev_clear_window: 已清空窗口 #{win.handle} 的叠加层")
 
         # 12c. dev_open_window / dev_open_window_fit_image: 新建图形窗口并设为当前活跃窗口
@@ -1055,6 +1102,43 @@ class HDevInterpreter:
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] laplace: 拉普拉斯滤波完成 ({result_type}) -> '{out_name}'")
 
+        # 24. OCR 字符识别: read_ocr_class_mlp / do_ocr_multi_class_mlp
+        elif op == "read_ocr_class_mlp":
+            handle_var = c_out[0] if c_out else "OCRHandle"
+            ocr_digits.get_classifier()
+            self.control_vars[handle_var] = 0
+            self.log(f"  [{inst.line_num}] read_ocr_class_mlp: 已载入内置字符分类器 (字符集 {ocr_digits.CHARSET}), 请求的字符库 '{c_in[0] if c_in else ''}' 以此替代 -> {handle_var}")
+
+        elif op == "do_ocr_multi_class_mlp":
+            char_name = i_in[0] if i_in else "Character"
+            src_reg = self.iconic_vars.get(char_name)
+            if not isinstance(src_reg, Region):
+                raise ValueError(f"输入对象 '{char_name}' 不是有效的 Region")
+            classes, confidences = ocr_digits.do_ocr_multi_class(src_reg)
+            class_var = c_out[0] if len(c_out) > 0 else "Class"
+            conf_var = c_out[1] if len(c_out) > 1 else "Confidence"
+            self.control_vars[class_var] = classes
+            self.control_vars[conf_var] = confidences
+            self.log(f"  [{inst.line_num}] do_ocr_multi_class_mlp: 识别 {len(classes)} 个字符 -> {class_var} = {''.join(classes)}")
+
+        # 25. disp_message (WindowHandle, String, CoordSystem, Row, Column, Color, Box)
+        elif op == "disp_message":
+            text_val = c_in[1] if len(c_in) > 1 else ""
+            if isinstance(text_val, list):
+                text = "".join(map(str, text_val)) if all(len(str(t)) == 1 for t in text_val) else "\n".join(map(str, text_val))
+            else:
+                text = str(text_val)
+            handle = int(c_in[0]) if len(c_in) > 0 and str(c_in[0]).lstrip("-").isdigit() else self.active_window
+            win = self.windows.get(handle, self._cur_win())
+            win.messages.append({
+                "text": text,
+                "row": c_in[3] if len(c_in) > 3 else 12,
+                "col": c_in[4] if len(c_in) > 4 else 12,
+                "color": c_in[5] if len(c_in) > 5 else "black",
+                "box": str(c_in[6]).lower() == "true" if len(c_in) > 6 else True,
+            })
+            self.log(f"  [{inst.line_num}] disp_message: 窗口 #{win.handle} 显示文字 '{text}'")
+
         else:
             self.log(f"  [{inst.line_num}] 未实现或通用算子 '{op}', 跳过执行")
 
@@ -1106,7 +1190,7 @@ class HDevInterpreter:
                     base_img = v
                     break
         if base_img is not None:
-            res["preview_base64"] = encode_image_base64(base_img)
+            res["preview_base64"] = encode_image_base64(_draw_messages(base_img, win.messages))
 
         merged_mask = None
         all_objects: List[Dict[str, Any]] = []
@@ -1186,8 +1270,9 @@ class HDevInterpreter:
             "objects": []
         }
 
+        messages = self._cur_win().messages
         if base_img is not None:
-            res["preview_base64"] = encode_image_base64(base_img)
+            res["preview_base64"] = encode_image_base64(_draw_messages(base_img, messages))
 
         if self.original_snapshot is not None:
             res["original_base64"] = encode_image_base64(self.original_snapshot)
@@ -1196,7 +1281,7 @@ class HDevInterpreter:
         target = self.iconic_vars.get(self.display_target) if self.display_target else None
 
         if isinstance(target, np.ndarray):
-            res["preview_base64"] = encode_image_base64(target)
+            res["preview_base64"] = encode_image_base64(_draw_messages(target, messages))
         elif isinstance(target, Region):
             if base_img is not None:
                 color_mask = create_colored_label_mask(target, base_img.shape[:2])
