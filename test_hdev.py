@@ -509,6 +509,27 @@ class TestHDevelopEngine(unittest.TestCase):
         debug = HDevInterpreter().load_script("endif")
         self.assertEqual(debug["stopped_reason"], "error")
 
+    def test_reduce_domain_limits_threshold_to_roi(self):
+        img = np.full((60, 100, 3), 255, dtype=np.uint8)
+        img[5:15, 5:15] = 0
+        img[30:45, 60:80] = 0
+        script = (
+            "gen_rectangle1 (ROI, 25, 50, 50, 90)\n"
+            "reduce_domain (Image, ROI, ImageReduced)\n"
+            "threshold (ImageReduced, Region, 0, 10)\n"
+            "connection (Region, Conn)\n"
+            "count_obj (Conn, Number)"
+        )
+        interpreter = HDevInterpreter(base_image=img)
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(interpreter.control_vars["Number"], 1)
+        unrestricted = HDevInterpreter(base_image=img)
+        unrestricted.execute_script("threshold (Image, Region, 0, 10)\nconnection (Region, Conn)\ncount_obj (Conn, Number)")
+        self.assertEqual(unrestricted.control_vars["Number"], 2)
+        bad = HDevInterpreter().execute_script("gen_rectangle1 (ROI, 0, 0, 5, 5)")
+        self.assertFalse(bad["success"])
+
     def test_select_obj_in_loop_collects_areas(self):
         card_path = str(self.project_root / "samples" / "social_card.png").replace("\\", "/")
         script = (

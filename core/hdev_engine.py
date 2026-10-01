@@ -109,6 +109,7 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "dev_display": (["Object"], [], [], []),
     "disp_obj": (["Object"], [], ["WindowHandle"], []),
     "reduce_domain": (["Image", "Region"], ["ImageReduced"], [], []),
+    "gen_rectangle1": ([], ["Rectangle"], ["Row1", "Column1", "Row2", "Column2"], []),
     "rgb_to_hsv": (["Image"], ["HSVImage"], [], []),
     "hsv_threshold": (["Image"], ["Region"], ["HMin", "HMax", "SMin", "SMax", "VMin", "VMax"], []),
     "find_shape_model": (["Image"], [], ["TemplateID", "AngleStart", "AngleExtent", "MinScore", "NumMatches"], ["Row", "Column", "Angle", "Score"]),
@@ -529,6 +530,8 @@ class HDevInterpreter:
         self.explicit_display_used: bool = False
         # OCR 分类器句柄表: 句柄 -> 字符集名称 (由 read_ocr_class_mlp 创建)
         self.ocr_handles: Dict[int, str] = {}
+        # 图像定义域 (reduce_domain 产出): 图像变量名 -> 布尔掩膜; threshold 等算子只在域内取像素
+        self.domains: Dict[str, np.ndarray] = {}
         # 单步调试执行指针: 已解析的指令序列与当前待执行指令下标 (由 load_script 填充)
         self.instructions: List[HDevInstruction] = []
         self.pc: int = 0
@@ -807,6 +810,8 @@ class HDevInterpreter:
                 raise ValueError(f"未找到输入图像 '{in_name}'")
             gray = ops.rgb1_to_gray(src)
             self.iconic_vars[out_name] = gray
+            if in_name in self.domains:
+                self.domains[out_name] = self.domains[in_name]
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] rgb1_to_gray: 转换为灰度图 '{out_name}'")
 
@@ -821,6 +826,8 @@ class HDevInterpreter:
                 raise ValueError(f"未找到输入图像 '{in_name}'")
             gray = ops.rgb1_to_gray(src) if len(src.shape) == 3 else src
             reg = ops.threshold(gray, min_gray, max_gray)
+            if in_name in self.domains:
+                reg.mask[~self.domains[in_name]] = 0
             self.iconic_vars[out_name] = reg
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] threshold: 分割范围 [{min_gray}, {max_gray}], 生成区域 '{out_name}'")
@@ -1226,6 +1233,36 @@ class HDevInterpreter:
             self.iconic_vars[out_name] = lap
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] laplace: 拉普拉斯滤波完成 ({result_type}) -> '{out_name}'")
+
+        # 23b. gen_rectangle1 (Rectangle, Row1, Column1, Row2, Column2): 轴对齐矩形 ROI
+        elif op == "gen_rectangle1":
+            out_name = i_out[0] if i_out else "Rectangle"
+            if len(c_in) < 4:
+                raise ValueError("gen_rectangle1 需要 4 个参数: Row1, Column1, Row2, Column2")
+            row1, col1, row2, col2 = (int(v) for v in c_in[:4])
+            base = next((v for v in reversed(list(self.iconic_vars.values())) if isinstance(v, np.ndarray)), None)
+            if base is None:
+                raise ValueError("gen_rectangle1 之前需要先 read_image 载入图像以确定画布尺寸")
+            geometry = {"type": "rect", "x": col1, "y": row1, "w": col2 - col1 + 1, "h": row2 - row1 + 1}
+            self.iconic_vars[out_name] = ops.create_mask_from_geometry(base.shape[:2], geometry)
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] gen_rectangle1: ROI 矩形 ({row1},{col1})-({row2},{col2}) -> '{out_name}'")
+
+        # 23c. reduce_domain (Image, Region, ImageReduced): 把图像定义域限制到 ROI 内
+        elif op == "reduce_domain":
+            img_name = i_in[0] if len(i_in) > 0 else "Image"
+            reg_name = i_in[1] if len(i_in) > 1 else "Region"
+            out_name = i_out[0] if i_out else "ImageReduced"
+            src = self.iconic_vars.get(img_name)
+            roi = self.iconic_vars.get(reg_name)
+            if src is None:
+                raise ValueError(f"未找到输入图像 '{img_name}'")
+            if not isinstance(roi, Region):
+                raise ValueError(f"输入对象 '{reg_name}' 不是有效的 Region")
+            self.iconic_vars[out_name] = ops.reduce_domain(src, roi)
+            self.domains[out_name] = roi.mask > 0
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] reduce_domain: 图像 '{img_name}' 限制到 ROI '{reg_name}' -> '{out_name}'")
 
         # 24. OCR 字符识别: read_ocr_class_mlp / do_ocr_multi_class_mlp
         elif op == "read_ocr_class_mlp":
