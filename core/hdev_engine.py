@@ -105,6 +105,7 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "smallest_circle": (["Regions"], [], [], ["Row", "Column", "Radius"]),
     "area_center": (["Regions"], [], [], ["Area", "Row", "Column"]),
     "count_obj": (["Objects"], [], [], ["Number"]),
+    "select_obj": (["Objects"], ["ObjectSelected"], ["Index"], []),
     "dev_display": (["Object"], [], [], []),
     "disp_obj": (["Object"], [], ["WindowHandle"], []),
     "reduce_domain": (["Image", "Region"], ["ImageReduced"], [], []),
@@ -462,6 +463,44 @@ class HDevParser:
 # ----------------------------------------------------------------------
 # 3. HDevInterpreter: 解释执行沙箱
 # ----------------------------------------------------------------------
+class _FlowMap:
+    """for/while/if 块配对表: 把控制流指令映射为可跳转的指令下标"""
+
+    def __init__(self, instructions: List[HDevInstruction]):
+        self.end_of: Dict[int, int] = {}
+        self.start_of: Dict[int, int] = {}
+        self.next_branch: Dict[int, int] = {}
+        self.if_end: Dict[int, int] = {}
+        loops: List[Tuple[str, int]] = []
+        ifs: List[List[int]] = []
+        closers = {"endfor": "for", "endwhile": "while"}
+        for pc, inst in enumerate(instructions):
+            t = inst.op_type
+            if t in ("for", "while"):
+                loops.append((t, pc))
+            elif t in closers:
+                if not loops or loops[-1][0] != closers[t]:
+                    raise ValueError(f"第 {inst.line_num} 行: {t} 没有匹配的 {closers[t]}")
+                start = loops.pop()[1]
+                self.end_of[start] = pc
+                self.start_of[pc] = start
+            elif t == "if":
+                ifs.append([pc])
+            elif t in ("elseif", "else", "endif"):
+                if not ifs:
+                    raise ValueError(f"第 {inst.line_num} 行: {t} 没有匹配的 if")
+                branch_pcs = ifs[-1]
+                self.next_branch[branch_pcs[-1]] = pc
+                branch_pcs.append(pc)
+                if t == "endif":
+                    for b in ifs.pop():
+                        self.if_end[b] = pc
+        if loops:
+            raise ValueError(f"第 {instructions[loops[-1][1]].line_num} 行: {loops[-1][0]} 缺少结束语句")
+        if ifs:
+            raise ValueError(f"第 {instructions[ifs[-1][0]].line_num} 行: if 缺少 endif")
+
+
 class HDevInterpreter:
     """HDevelop 脚本解释执行引擎"""
 
@@ -493,6 +532,8 @@ class HDevInterpreter:
         # 单步调试执行指针: 已解析的指令序列与当前待执行指令下标 (由 load_script 填充)
         self.instructions: List[HDevInstruction] = []
         self.pc: int = 0
+        self._flow: Optional[_FlowMap] = None
+        self._active_loops: set = set()
         # 默认底图注入 (注意: 不标记窗口 0 为"已使用", 否则会在多窗口场景下
         # 被误判为脚本主动打开的窗口而出现在窗口切换标签页里; 各窗口合成画面时
         # 仍会在找不到自己专属底图时回退取用这张预注入的图像, 见 _composite_window)
@@ -520,12 +561,23 @@ class HDevInterpreter:
             return self.control_vars[s]
         # 常量或简单四则运算
         try:
-            # 仅允许安全数学运算
-            allowed_names = {k: v for k, v in self.control_vars.items() if isinstance(v, (int, float, list, str))}
-            allowed_names.update({"max": max, "min": min, "abs": abs, "round": round})
-            return eval(s, {"__builtins__": None}, allowed_names)
+            return self._eval_strict(s)
         except Exception:
             return s
+
+    def _eval_strict(self, expr: str) -> Any:
+        """仅允许安全数学运算; 求值失败直接抛出异常 (供条件判断使用)"""
+        allowed_names = {k: v for k, v in self.control_vars.items() if isinstance(v, (int, float, list, str))}
+        allowed_names.update({"max": max, "min": min, "abs": abs, "round": round, "true": True, "false": False})
+        return eval(expr, {"__builtins__": None}, allowed_names)
+
+    def _eval_condition(self, cond: str) -> bool:
+        """求值 if/while 条件: HALCON 的 '=' 视为相等比较, '#' 视为不等"""
+        normalized = re.sub(r"(?<![<>!=:])=(?!=)", "==", cond).replace("#", "!=")
+        try:
+            return bool(self._eval_strict(normalized))
+        except Exception as e:
+            raise ValueError(f"无法求值条件 '{cond}': {e}")
 
     def _run_single_instruction(self, inst: HDevInstruction) -> None:
         """执行单条指令 (赋值语句或算子调用), 不负责 pc 步进与异常捕获, 供整段执行与单步调试共用"""
@@ -535,7 +587,58 @@ class HDevInterpreter:
             self.log(f"  [{inst.line_num}] {inst.assign_var} := {val}")
         elif inst.op_type == "operator":
             self._execute_operator(inst)
-        # for/while/if 与其他类型: 当前实现仅顺序跳步, 无需额外处理
+
+    def _prepare(self, instructions: List[HDevInstruction]) -> None:
+        """装载指令序列并建立 for/while/if 的块配对表"""
+        self.instructions = instructions
+        self._flow = _FlowMap(instructions)
+        self._active_loops = set()
+
+    def _advance(self, pc: int) -> int:
+        """执行 pc 处的指令并返回下一条应执行的指令下标 (处理 for/while/if 的跳转)"""
+        inst = self.instructions[pc]
+        t = inst.op_type
+        flow = self._flow
+        if t == "for":
+            meta = inst.for_loop_meta
+            if pc not in self._active_loops:
+                self._active_loops.add(pc)
+                self.control_vars[inst.assign_var] = self._eval_expr(meta["start"])
+            step = self._eval_expr(meta["step"])
+            end = self._eval_expr(meta["end"])
+            idx = self.control_vars[inst.assign_var]
+            if (step >= 0 and idx > end) or (step < 0 and idx < end):
+                self._active_loops.discard(pc)
+                return flow.end_of[pc] + 1
+            return pc + 1
+        if t == "endfor":
+            for_pc = flow.start_of[pc]
+            step = self._eval_expr(self.instructions[for_pc].for_loop_meta["step"])
+            self.control_vars[self.instructions[for_pc].assign_var] += step
+            return for_pc
+        if t == "while":
+            return pc + 1 if self._eval_condition(inst.condition) else flow.end_of[pc] + 1
+        if t == "endwhile":
+            return flow.start_of[pc]
+        if t == "if":
+            return self._select_branch(pc)
+        if t in ("elseif", "else"):
+            return flow.if_end[pc] + 1
+        if t == "endif":
+            return pc + 1
+        self._run_single_instruction(inst)
+        return pc + 1
+
+    def _select_branch(self, pc: int) -> int:
+        """在 if/elseif 处按条件选择分支, 返回所选分支体的首条指令下标 (无分支命中则返回 endif 之后)"""
+        inst = self.instructions[pc]
+        if self._eval_condition(inst.condition):
+            return pc + 1
+        nxt = self._flow.next_branch[pc]
+        kind = self.instructions[nxt].op_type
+        if kind == "elseif":
+            return self._select_branch(nxt)
+        return nxt + 1
 
     def execute_script(self, script_content: str, timeout_sec: float = 3.0) -> Dict[str, Any]:
         """执行完整 HDevelop 脚本"""
@@ -549,14 +652,13 @@ class HDevInterpreter:
         start_time = time.time()
 
         try:
+            self._prepare(instructions)
             while pc < total_inst:
                 # 超时熔断保护
                 if time.time() - start_time > timeout_sec:
                     raise TimeoutError(f"HDevelop 脚本执行超时 (强制熔断阈值: {timeout_sec:.1f}s)")
 
-                inst = instructions[pc]
-                self._run_single_instruction(inst)
-                pc += 1
+                pc = self._advance(pc)
 
             duration_ms = round((time.perf_counter() - t0) * 1000.0, 2)
             self.log(f"[✓] 脚本执行完毕，耗时 {duration_ms} ms")
@@ -575,7 +677,7 @@ class HDevInterpreter:
 
         except Exception as e:
             duration_ms = round((time.perf_counter() - t0) * 1000.0, 2)
-            err_msg = f"第 {inst.line_num} 行执行失败: {e}" if pc < total_inst else str(e)
+            err_msg = f"第 {instructions[pc].line_num} 行执行失败: {e}" if pc < total_inst else str(e)
             self.log(f"[!] {err_msg}")
             return {
                 "success": False,
@@ -592,8 +694,13 @@ class HDevInterpreter:
     # ------------------------------------------------------------------
     def load_script(self, script_content: str) -> Dict[str, Any]:
         """解析脚本并重置单步调试执行指针, 返回初始调试状态快照 (尚未执行任何指令)"""
-        self.instructions = HDevParser.parse_script(script_content)
         self.pc = 0
+        try:
+            self._prepare(HDevParser.parse_script(script_content))
+        except ValueError as e:
+            self.instructions = []
+            self.log(f"[!] {e}")
+            return self._debug_status(finished=True, error=str(e), stopped_reason="error")
         self.log(f"[*] 调试会话已加载脚本: 共 {len(self.instructions)} 条指令")
         return self._debug_status(finished=len(self.instructions) == 0, stopped_reason="ready")
 
@@ -624,8 +731,7 @@ class HDevInterpreter:
 
         inst = self.instructions[self.pc]
         try:
-            self._run_single_instruction(inst)
-            self.pc += 1
+            self.pc = self._advance(self.pc)
             finished = self.pc >= len(self.instructions)
             return self._debug_status(finished=finished, stopped_reason="finished" if finished else "step")
         except Exception as e:
@@ -645,8 +751,7 @@ class HDevInterpreter:
             if steps_taken > 0 and inst.line_num in bp_set:
                 return self._debug_status(finished=False, stopped_reason="breakpoint")
             try:
-                self._run_single_instruction(inst)
-                self.pc += 1
+                self.pc = self._advance(self.pc)
                 steps_taken += 1
             except Exception as e:
                 err_msg = f"第 {inst.line_num} 行执行失败: {e}"
@@ -870,6 +975,24 @@ class HDevInterpreter:
             else:
                 self.control_vars["Metrics"] = metrics
                 self.log(f"  [{inst.line_num}] measure_region: 计算完成并存入 Metrics")
+
+        # 10c. select_obj (Objects, ObjectSelected, Index): 按 1 起始下标取出单个连通域
+        elif op == "select_obj":
+            in_name = i_in[0] if i_in else "Objects"
+            out_name = i_out[0] if i_out else "ObjectSelected"
+            src_reg = self.iconic_vars.get(in_name)
+            if not isinstance(src_reg, Region):
+                raise ValueError(f"输入对象 '{in_name}' 不是有效的 Region")
+            index = int(c_in[0]) if c_in else 1
+            if not 1 <= index <= len(src_reg.objects):
+                raise ValueError(f"select_obj 下标 {index} 超出范围 (共 {len(src_reg.objects)} 个目标)")
+            obj = src_reg.objects[index - 1]
+            r0, c0, r1, c1 = obj.bbox
+            mask = np.zeros_like(src_reg.mask)
+            mask[r0:r1, c0:c1] = src_reg.mask[r0:r1, c0:c1]
+            self.iconic_vars[out_name] = Region(mask=mask, objects=[obj], is_connected=True)
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] select_obj: 取第 {index} 个目标 -> '{out_name}'")
 
         # 11. count_obj (Objects, Number)
         elif op == "count_obj":

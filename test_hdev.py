@@ -475,6 +475,67 @@ class TestHDevelopEngine(unittest.TestCase):
         res = interpreter.execute_script("threshold (Image, Region, 0, 10)\nconnection (Region, Conn)\ndo_ocr_multi_class_mlp (Conn, Image, 99, Class, Conf)")
         self.assertFalse(res["success"])
 
+    def _run_vars(self, script: str) -> HDevInterpreter:
+        interpreter = HDevInterpreter(base_image=np.full((32, 32, 3), 255, dtype=np.uint8))
+        res = interpreter.execute_script(script)
+        self.assertTrue(res["success"], f"Execution error: {res.get('error')}")
+        return interpreter
+
+    def test_control_flow_for_loop(self):
+        it = self._run_vars("Sum := 0\nfor I := 1 to 4 by 1\nSum := Sum + I\nendfor")
+        self.assertEqual(it.control_vars["Sum"], 10)
+        it = self._run_vars("N := 0\nfor I := 5 to 1 by -2\nN := N + 1\nendfor")
+        self.assertEqual(it.control_vars["N"], 3)
+
+    def test_control_flow_nested_for_and_while(self):
+        it = self._run_vars(
+            "C := 0\nfor I := 1 to 3\nfor J := 1 to 2\nC := C + 1\nendfor\nendfor\n"
+            "K := 0\nwhile (K < 5)\nK := K + 2\nendwhile"
+        )
+        self.assertEqual(it.control_vars["C"], 6)
+        self.assertEqual(it.control_vars["K"], 6)
+
+    def test_control_flow_if_elseif_else(self):
+        script = "X := {x}\nif (X > 5)\nR := 'big'\nelseif (X = 5)\nR := 'five'\nelse\nR := 'small'\nendif\nAfter := 1"
+        for x, expected in ((9, "big"), (5, "five"), (1, "small")):
+            it = self._run_vars(script.format(x=x))
+            self.assertEqual(it.control_vars["R"], expected)
+            self.assertEqual(it.control_vars["After"], 1)
+
+    def test_control_flow_unbalanced_reports_error(self):
+        res = HDevInterpreter().execute_script("for I := 1 to 3\nX := 1")
+        self.assertFalse(res["success"])
+        self.assertIn("缺少结束语句", res["error"])
+        debug = HDevInterpreter().load_script("endif")
+        self.assertEqual(debug["stopped_reason"], "error")
+
+    def test_select_obj_in_loop_collects_areas(self):
+        card_path = str(self.project_root / "samples" / "social_card.png").replace("\\", "/")
+        script = (
+            f"read_image (Image, '{card_path}')\n"
+            "threshold (Image, Region, 0, 10)\n"
+            "connection (Region, Conn)\n"
+            "count_obj (Conn, Number)\n"
+            "Total := 0\n"
+            "for I := 1 to Number by 1\n"
+            "select_obj (Conn, Obj, I)\n"
+            "count_obj (Obj, One)\n"
+            "Total := Total + One\n"
+            "endfor"
+        )
+        it = self._run_vars(script)
+        self.assertEqual(it.control_vars["Number"], 18)
+        self.assertEqual(it.control_vars["Total"], 18)
+        bad = HDevInterpreter().execute_script("select_obj (Conn, Obj, 3)")
+        self.assertFalse(bad["success"])
+
+    def test_control_flow_single_step_follows_jumps(self):
+        interpreter = HDevInterpreter()
+        interpreter.load_script("S := 0\nfor I := 1 to 2\nS := S + I\nendfor")
+        status = interpreter.continue_run()
+        self.assertTrue(status["finished"])
+        self.assertEqual(interpreter.control_vars["S"], 3)
+
     def test_disp_message_cleared_by_dev_clear_window(self):
         interpreter = HDevInterpreter(base_image=np.full((64, 64, 3), 200, dtype=np.uint8))
         interpreter.execute_script("dev_open_window (0, 0, 64, 64, 'black', W)\ndisp_message (W, 'hi', 'window', 5, 5, 'red', 'true')")
