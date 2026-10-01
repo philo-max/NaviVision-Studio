@@ -17,6 +17,24 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "ok")
         self.assertFalse(response.json()["script_runner_enabled"])
 
+    def test_select_shape_summary_objects_carry_bbox(self):
+        import numpy as np
+        from core.pipeline import Pipeline
+
+        img = np.zeros((60, 60, 3), dtype=np.uint8)
+        img[10:30, 10:30] = 255
+        pipeline = Pipeline()
+        pipeline.load_source_image(img)
+        results = pipeline.set_steps([
+            {"id": "s1", "operator": "read_image", "enabled": True},
+            {"id": "s2", "operator": "threshold", "params": {"min_gray": 200, "max_gray": 255}, "enabled": True},
+            {"id": "s3", "operator": "connection", "params": {"connectivity": 8}, "enabled": True},
+            {"id": "s4", "operator": "select_shape", "params": {"min_area": 10, "max_area": 9999}, "enabled": True},
+        ])
+        objects = results[3]["summary"]["objects"]
+        self.assertEqual(len(objects), 1)
+        self.assertEqual(objects[0]["bbox"], [10, 10, 30, 30])
+
     def test_pipeline_rejects_unknown_operator(self):
         response = self.client.post(
             "/api/pipeline/update",

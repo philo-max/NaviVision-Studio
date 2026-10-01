@@ -575,11 +575,6 @@ document.addEventListener('DOMContentLoaded', () => {
     renderScriptResultToViewport(win);
   };
 
-  // 运行代码按钮
-  document.getElementById('btnRunScript').addEventListener('click', () => {
-    codeEditor.runScript();
-  });
-
   // 单步调试控制按钮: 开始 / 单步 / 继续(断点) / 停止
   document.getElementById('btnDebugStart').addEventListener('click', () => {
     codeEditor.debugStart();
