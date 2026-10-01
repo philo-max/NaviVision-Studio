@@ -1700,3 +1700,274 @@ body {
   color: var(--text-muted);
 }
 
+
+/* ==========================================================================
+   Results Dock: bottom-docked data panel (object features / OCR results)
+   ========================================================================== */
+.inspector-title {
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.panel-viewport .viewport-stage {
+  min-height: 140px;
+}
+
+.results-dock {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-bright);
+  overflow: hidden;
+}
+
+.dock-resizer {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: ns-resize;
+  z-index: 5;
+}
+
+.dock-resizer:hover,
+.dock-resizer:active {
+  background: var(--accent-soft);
+}
+
+.results-dock.collapsed .dock-resizer {
+  cursor: default;
+}
+
+.dock-header {
+  flex: none;
+  height: 38px;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 0 8px 0 4px;
+  background: var(--bg-panel-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dock-tabs {
+  display: flex;
+}
+
+.dock-tab {
+  padding: 0 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dock-tab:hover {
+  color: var(--text-main);
+}
+
+.dock-tab.active {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent-hover);
+}
+
+.dock-badge {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.dock-tab.active .dock-badge {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.dock-summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.dock-summary .chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.dock-summary .chip em {
+  margin-right: 6px;
+  font-style: normal;
+  color: var(--text-dim);
+}
+
+.dock-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.results-dock.collapsed .dock-body {
+  display: none;
+}
+
+.dock-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-pane[hidden] {
+  display: none;
+}
+
+.dock-pane .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.result-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 12px;
+  text-align: left;
+  white-space: nowrap;
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-bright);
+  cursor: pointer;
+  user-select: none;
+}
+
+.result-table th:hover {
+  color: var(--accent-hover);
+}
+
+.result-table td {
+  padding: 6px 12px;
+  white-space: nowrap;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.result-table tbody tr:nth-child(even) td {
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.result-table tbody tr:hover td {
+  background: var(--bg-hover);
+  color: var(--accent-hover);
+}
+
+.result-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-table th.num {
+  text-align: right;
+}
+
+.result-table .col-id {
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+
+.result-table .col-dim {
+  color: var(--text-dim);
+}
+
+.result-table .col-char {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.result-table td.empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.conf-bar {
+  display: inline-block;
+  width: 60px;
+  height: 6px;
+  margin-right: 8px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.conf-bar i {
+  display: block;
+  height: 100%;
+  background: var(--success);
+}
+
+.ocr-hero {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(90deg, var(--accent-soft), transparent);
+}
+
+.ocr-text {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--success);
+  word-break: break-all;
+}
+
+.ocr-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}

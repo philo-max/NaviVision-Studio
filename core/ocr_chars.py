@@ -172,18 +172,29 @@ def _resolve_confusables(classes: List[str]) -> List[str]:
     return classes
 
 
-def do_ocr_multi_class(region: Region, charset_name: str = DEFAULT_CHARSET_NAME) -> Tuple[List[str], List[float]]:
-    """对 Region 中每个连通域单独分类, 按阅读顺序返回 (Class 列表, Confidence 列表)"""
+def recognize_regions(region: Region, charset_name: str = DEFAULT_CHARSET_NAME) -> List[dict]:
+    """对 Region 中每个连通域单独分类, 按阅读顺序返回逐字符明细 (字符 / 置信度 / 质心 / 外接框 / 面积)"""
     classifier = get_classifier(charset_name)
     connected = region if region.is_connected else connection(region)
-    classes: List[str] = []
-    confidences: List[float] = []
+    results = []
     for obj in _reading_order(connected.objects):
         r0, c0, r1, c1 = obj.bbox
-        glyph = connected.mask[r0:r1, c0:c1]
-        ch, conf = classifier.classify(glyph)
-        classes.append(ch)
-        confidences.append(conf)
+        ch, conf = classifier.classify(connected.mask[r0:r1, c0:c1])
+        results.append({
+            "char": ch,
+            "confidence": conf,
+            "centroid": [round(obj.centroid[0], 1), round(obj.centroid[1], 1)],
+            "bbox": [r0, c0, r1, c1],
+            "area": obj.area,
+        })
     if charset_name == DEFAULT_CHARSET_NAME:
-        classes = _resolve_confusables(classes)
-    return classes, confidences
+        resolved = _resolve_confusables([r["char"] for r in results])
+        for r, ch in zip(results, resolved):
+            r["char"] = ch
+    return results
+
+
+def do_ocr_multi_class(region: Region, charset_name: str = DEFAULT_CHARSET_NAME) -> Tuple[List[str], List[float]]:
+    """返回 (Class 列表, Confidence 列表), 与 HALCON do_ocr_multi_class_mlp 的输出对应"""
+    results = recognize_regions(region, charset_name)
+    return [r["char"] for r in results], [r["confidence"] for r in results]

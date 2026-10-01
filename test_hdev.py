@@ -454,6 +454,15 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertEqual("".join(interpreter.control_vars["Class"]), "44030120020815123X")
         self.assertEqual(len(interpreter.control_vars["Confidence"]), 18)
         self.assertEqual(interpreter._cur_win().messages[0]["text"], "44030120020815123X")
+        ocr = res["ocr"]
+        self.assertEqual(ocr["text"], "44030120020815123X")
+        self.assertEqual(len(ocr["chars"]), 18)
+        self.assertEqual([c["index"] for c in ocr["chars"]], list(range(1, 19)))
+        self.assertTrue(all({"char", "confidence", "centroid", "bbox"} <= set(c) for c in ocr["chars"]))
+        plain = HDevInterpreter(base_image=np.full((32, 32, 3), 255, dtype=np.uint8)).execute_script("threshold (Image, R, 0, 10)")
+        self.assertIsNone(plain["ocr"])
+        for obj in res["objects"]:
+            self.assertIn("rectangularity", obj)
 
     def test_ocr_letters_and_library_charset(self):
         """A-Z 字库可识别大写字母, 0-9 字库只输出数字"""

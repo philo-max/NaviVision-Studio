@@ -532,6 +532,8 @@ class HDevInterpreter:
         self.ocr_handles: Dict[int, str] = {}
         # 图像定义域 (reduce_domain 产出): 图像变量名 -> 布尔掩膜; threshold 等算子只在域内取像素
         self.domains: Dict[str, np.ndarray] = {}
+        # 最近一次 do_ocr_multi_class_mlp 的逐字符识别结果 (供前端结果面板展示)
+        self.ocr_result: Optional[Dict[str, Any]] = None
         # 单步调试执行指针: 已解析的指令序列与当前待执行指令下标 (由 load_script 填充)
         self.instructions: List[HDevInstruction] = []
         self.pc: int = 0
@@ -1283,7 +1285,14 @@ class HDevInterpreter:
             handle = c_in[0] if c_in else None
             if handle not in self.ocr_handles:
                 raise ValueError("OCR 句柄无效: 请先调用 read_ocr_class_mlp")
-            classes, confidences = ocr_chars.do_ocr_multi_class(src_reg, self.ocr_handles[handle])
+            details = ocr_chars.recognize_regions(src_reg, self.ocr_handles[handle])
+            classes = [d["char"] for d in details]
+            confidences = [d["confidence"] for d in details]
+            self.ocr_result = {
+                "text": "".join(classes),
+                "mean_confidence": round(sum(confidences) / len(confidences), 3) if confidences else 0.0,
+                "chars": [{"index": i + 1, **d} for i, d in enumerate(details)],
+            }
             class_var = c_out[0] if len(c_out) > 0 else "Class"
             conf_var = c_out[1] if len(c_out) > 1 else "Confidence"
             self.control_vars[class_var] = classes
@@ -1339,9 +1348,10 @@ class HDevInterpreter:
 
     def _build_visualization_payload(self) -> Dict[str, Any]:
         """为 Web 端 Canvas Viewport 打包当前渲染数据"""
-        if self.explicit_display_used:
-            return self._build_layered_visualization_payload()
-        return self._build_single_target_visualization_payload()
+        payload = (self._build_layered_visualization_payload() if self.explicit_display_used
+                   else self._build_single_target_visualization_payload())
+        payload["ocr"] = self.ocr_result
+        return payload
 
     def _composite_window(self, win: _WindowState) -> Dict[str, Any]:
         """将单个图形窗口当前的叠加状态 (底图 + Region 掩膜 + XLD 轮廓) 合成为可渲染的画面数据"""
@@ -1378,6 +1388,8 @@ class HDevInterpreter:
                     "id": obj.id,
                     "area": obj.area,
                     "circularity": obj.circularity,
+                    "aspect_ratio": round(obj.aspect_ratio, 3),
+                    "rectangularity": round(obj.rectangularity, 3),
                     "centroid": [round(x, 1) for x in obj.centroid],
                     "bbox": list(obj.bbox)
                 }
@@ -1460,6 +1472,8 @@ class HDevInterpreter:
                     "id": obj.id,
                     "area": obj.area,
                     "circularity": obj.circularity,
+                    "aspect_ratio": round(obj.aspect_ratio, 3),
+                    "rectangularity": round(obj.rectangularity, 3),
                     "centroid": [round(x, 1) for x in obj.centroid],
                     "bbox": list(obj.bbox)
                 }

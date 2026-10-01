@@ -6,7 +6,7 @@
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
   <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
-  <link rel="stylesheet" href="/static/css/style.css?v=20260923_responsive">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261002_dock">
 </head>
 <body>
 
@@ -273,6 +273,34 @@
         </div>
       </div>
 
+      <!-- 结果面板 (底部停靠): 目标特征表 / 识别结果 -->
+      <div class="results-dock" id="resultsDock">
+        <div class="dock-resizer" id="dockResizer" title="拖动调整高度"></div>
+        <div class="dock-header">
+          <div class="dock-tabs">
+            <button class="dock-tab active" data-pane="objects">目标特征表 <span class="dock-badge" id="dockObjCount">0</span></button>
+            <button class="dock-tab" data-pane="ocr">识别结果 <span class="dock-badge" id="dockOcrCount">0</span></button>
+          </div>
+          <div class="dock-summary" id="dockSummary"></div>
+          <div class="dock-actions">
+            <button class="icon-btn" id="btnDockExport" title="导出当前表格为 CSV">导出 CSV</button>
+            <button class="icon-btn" id="btnDockToggle" title="折叠结果面板">▾</button>
+          </div>
+        </div>
+        <div class="dock-body">
+          <div class="dock-pane" data-pane="objects">
+            <div class="table-scroll"><table class="result-table" id="objectResultTable"></table></div>
+          </div>
+          <div class="dock-pane" data-pane="ocr" hidden>
+            <div class="ocr-hero">
+              <div class="ocr-text" id="ocrText">—</div>
+              <div class="ocr-meta" id="ocrMeta">尚无识别结果</div>
+            </div>
+            <div class="table-scroll"><table class="result-table" id="ocrResultTable"></table></div>
+          </div>
+        </div>
+      </div>
+
       <!-- 底部像素十字丝遥测 HUD -->
       <div class="viewport-hud">
         <div class="hud-item">
@@ -296,35 +324,12 @@
 
     <!-- 3. Right Column: Inspector & Histogram (HDevelop Operator Window) -->
     <aside class="panel-inspector">
-      <div class="inspector-tabs">
-        <button class="tab-btn active" data-tab="inspector">算子调谐</button>
-        <button class="tab-btn" data-tab="objects">目标数据 <span id="tabObjCount">(0)</span></button>
-      </div>
+      <div class="inspector-title">算子调谐</div>
 
       <!-- Tab 1: 算子参数表单 -->
-      <div class="inspector-content" id="tabInspector">
+      <div class="inspector-content" id="tabInspector" style="display:flex;">
         <div id="inspectorContent">
           <!-- 由 pipeline_ui.js 动态填充 -->
-        </div>
-      </div>
-
-      <!-- Tab 2: 连通域目标特征表格 -->
-      <div class="inspector-content" id="tabObjects">
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>面积 (px)</th>
-                <th>圆度 (0~1)</th>
-                <th>质心 (Y, X)</th>
-                <th>外接框 [Y1,X1,Y2,X2]</th>
-              </tr>
-            </thead>
-            <tbody id="objectTableBody">
-              <!-- 由 app.js 动态填充 -->
-            </tbody>
-          </table>
         </div>
       </div>
     </aside>
@@ -440,6 +445,7 @@ for obj in result["objects"]:
   <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
   <script src="/static/js/code_editor.js?v=20260923_rmtpl"></script>
   <script src="/static/js/operator_manual.js?v=20260923_overlay"></script>
-  <script src="/static/js/app.js?v=20261002_runfix"></script>
+  <script src="/static/js/results_panel.js?v=20261002_dock"></script>
+  <script src="/static/js/app.js?v=20261002_dock"></script>
 </body>
 </html>

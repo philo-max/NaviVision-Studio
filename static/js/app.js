@@ -7,6 +7,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 1. 初始化 Viewport
   const viewportStage = document.getElementById('viewportStage');
   const viewport = new StudioViewport(viewportStage);
+  const resultsPanel = new ResultsPanel(document.getElementById('resultsDock'), {
+    onHighlight: (id) => viewport.highlightObject(id)
+  });
 
   // 2. 初始化 Pipeline UI
   const pipelineListEl = document.getElementById('pipelineList');
@@ -112,50 +115,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 4. 更新特征数据表 (Tab 2)
+  // 4. 更新结果面板的目标特征表
   function updateObjectTable() {
-    const tableBody = document.getElementById('objectTableBody');
-    const tableContainer = document.getElementById('tableContainer');
-    if (!tableBody) return;
-
-    // 查找包含对象列表的最近结果
     const targetRes = [...currentResults].reverse().find(r => r.summary?.objects || r.summary?.objects_info);
-    const objects = targetRes?.summary?.objects || targetRes?.summary?.objects_info || [];
-
-    const countBadge = document.getElementById('tabObjCount');
-    if (countBadge) countBadge.textContent = `(${objects.length})`;
-
-    if (objects.length === 0) {
-      tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">当前步骤无连通域对象</td></tr>';
-      return;
-    }
-
-    let html = '';
-    objects.forEach(obj => {
-      const circ = obj.circularity !== undefined ? obj.circularity : 'N/A';
-      const centroidStr = obj.centroid ? `(${obj.centroid[0]}, ${obj.centroid[1]})` : 'N/A';
-      html += `
-        <tr data-obj-id="${obj.id}">
-          <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
-          <td>${obj.area}</td>
-          <td>${circ}</td>
-          <td>${centroidStr}</td>
-          <td style="font-size:10px;color:var(--text-muted);">${obj.bbox ? `[${obj.bbox.join(',')}]` : ''}</td>
-        </tr>
-      `;
-    });
-    tableBody.innerHTML = html;
-
-    // 表格行点击高亮对应连通域
-    tableBody.querySelectorAll('tr').forEach(row => {
-      row.addEventListener('mouseenter', () => {
-        const id = parseInt(row.dataset.objId);
-        viewport.highlightObject(id);
-      });
-      row.addEventListener('mouseleave', () => {
-        viewport.highlightObject(null);
-      });
-    });
+    resultsPanel.setObjects(targetRes?.summary?.objects || targetRes?.summary?.objects_info || []);
   }
 
   // 5. 恢复会话流水线 (若已有会话)
@@ -387,26 +350,6 @@ document.addEventListener('DOMContentLoaded', () => {
     viewport.redrawMask();
   });
 
-  // 9. 右侧 Tab 切换
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabInspector = document.getElementById('tabInspector');
-  const tabObjects = document.getElementById('tabObjects');
-
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const target = btn.dataset.tab;
-      if (target === 'inspector') {
-        tabInspector.style.display = 'flex';
-        tabObjects.style.display = 'none';
-      } else {
-        tabInspector.style.display = 'none';
-        tabObjects.style.display = 'flex';
-      }
-    });
-  });
-
   // 10. 代码导出模态框 (Code Exporter)
   const codeModal = document.getElementById('codeModal');
   const codeViewer = document.getElementById('codeViewer');
@@ -541,27 +484,8 @@ document.addEventListener('DOMContentLoaded', () => {
     viewport.renderMask(result.mask_base64 || null, result.objects || []);
     viewport.renderContours(result.contours || []);
 
-    const tableBody = document.getElementById('objectTableBody');
-    const countBadge = document.getElementById('tabObjCount');
-    const objects = result.objects || [];
-    if (countBadge) countBadge.textContent = `(${objects.length})`;
-    if (tableBody) {
-      let html = '';
-      objects.forEach(obj => {
-        const circ = obj.circularity !== undefined ? obj.circularity : 'N/A';
-        const centroidStr = obj.centroid ? `(${Math.round(obj.centroid[0])}, ${Math.round(obj.centroid[1])})` : 'N/A';
-        html += `
-          <tr data-obj-id="${obj.id}">
-            <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
-            <td>${obj.area}</td>
-            <td>${circ}</td>
-            <td>${centroidStr}</td>
-            <td style="font-size:10px;color:var(--text-muted);">${obj.bbox ? `[${obj.bbox.join(',')}]` : ''}</td>
-          </tr>
-        `;
-      });
-      tableBody.innerHTML = html;
-    }
+    resultsPanel.setObjects(result.objects || []);
+    if ('ocr' in result) resultsPanel.setOcr(result.ocr);
   }
 
   const codeEditor = new InteractiveCodeEditor(scriptEditorEl, lineNumbersEl, terminalLogsEl, (result) => {
@@ -633,6 +557,7 @@ document.addEventListener('DOMContentLoaded', () => {
     panelCodeStudio.style.display = 'none';
     if (btnTopRunScript) btnTopRunScript.style.display = 'none';
     lastCodeRunResult = null;
+    resultsPanel.setOcr(null);
     if (!compareView.hidden) refreshCompareView();
   });
 
