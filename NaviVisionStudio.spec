@@ -2,11 +2,11 @@
 
 
 a = Analysis(
-    ['app.py'],
+    ['launcher.py'],
     pathex=[],
     binaries=[],
     datas=[('static', 'static'), ('samples', 'samples')],
-    hiddenimports=[],
+    hiddenimports=['app'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -26,7 +26,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    console=False,
+    icon='branding/app.ico',
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
