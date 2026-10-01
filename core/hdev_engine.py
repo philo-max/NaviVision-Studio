@@ -19,7 +19,7 @@ import numpy as np
 
 from core.types import Region, RegionObject, XLDContour
 from core import operators as ops
-from core import ocr_digits
+from core import ocr_chars
 from core.pipeline import encode_image_base64, create_colored_label_mask
 
 
@@ -488,6 +488,8 @@ class HDevInterpreter:
         self._next_window_handle: int = 1
         # 脚本中是否显式调用过 dev_display/disp_obj/dev_open_window (决定渲染走叠加模式还是单目标覆盖模式)
         self.explicit_display_used: bool = False
+        # OCR 分类器句柄表: 句柄 -> 字符集名称 (由 read_ocr_class_mlp 创建)
+        self.ocr_handles: Dict[int, str] = {}
         # 单步调试执行指针: 已解析的指令序列与当前待执行指令下标 (由 load_script 填充)
         self.instructions: List[HDevInstruction] = []
         self.pc: int = 0
@@ -1105,16 +1107,23 @@ class HDevInterpreter:
         # 24. OCR 字符识别: read_ocr_class_mlp / do_ocr_multi_class_mlp
         elif op == "read_ocr_class_mlp":
             handle_var = c_out[0] if c_out else "OCRHandle"
-            ocr_digits.get_classifier()
-            self.control_vars[handle_var] = 0
-            self.log(f"  [{inst.line_num}] read_ocr_class_mlp: 已载入内置字符分类器 (字符集 {ocr_digits.CHARSET}), 请求的字符库 '{c_in[0] if c_in else ''}' 以此替代 -> {handle_var}")
+            library = str(c_in[0]) if c_in else ""
+            charset_name = ocr_chars.charset_name_for_library(library)
+            ocr_chars.get_classifier(charset_name)
+            handle = len(self.ocr_handles)
+            self.ocr_handles[handle] = charset_name
+            self.control_vars[handle_var] = handle
+            self.log(f"  [{inst.line_num}] read_ocr_class_mlp: 已载入内置字符分类器 ({charset_name}), 请求的字符库 '{library}' 以此替代 -> {handle_var}")
 
         elif op == "do_ocr_multi_class_mlp":
             char_name = i_in[0] if i_in else "Character"
             src_reg = self.iconic_vars.get(char_name)
             if not isinstance(src_reg, Region):
                 raise ValueError(f"输入对象 '{char_name}' 不是有效的 Region")
-            classes, confidences = ocr_digits.do_ocr_multi_class(src_reg)
+            handle = c_in[0] if c_in else None
+            if handle not in self.ocr_handles:
+                raise ValueError("OCR 句柄无效: 请先调用 read_ocr_class_mlp")
+            classes, confidences = ocr_chars.do_ocr_multi_class(src_reg, self.ocr_handles[handle])
             class_var = c_out[0] if len(c_out) > 0 else "Class"
             conf_var = c_out[1] if len(c_out) > 1 else "Confidence"
             self.control_vars[class_var] = classes

@@ -455,6 +455,26 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertEqual(len(interpreter.control_vars["Confidence"]), 18)
         self.assertEqual(interpreter._cur_win().messages[0]["text"], "44030120020815123X")
 
+    def test_ocr_letters_and_library_charset(self):
+        """A-Z 字库可识别大写字母, 0-9 字库只输出数字"""
+        from core import ocr_chars
+        self.assertEqual(ocr_chars.charset_name_for_library("Industrial_0-9.omc"), "digits")
+        self.assertEqual(ocr_chars.charset_name_for_library("Industrial_A-Z+_Rej.omc"), "alnum")
+        canvas = np.full((60, 400), 255, dtype=np.uint8)
+        for i, ch in enumerate("HELLO"):
+            import cv2
+            cv2.putText(canvas, ch, (10 + i * 70, 45), cv2.FONT_HERSHEY_DUPLEX, 1.5, 0, 3)
+        region = ops.connection(ops.threshold(canvas, 0, 10))
+        classes, _ = ocr_chars.do_ocr_multi_class(region)
+        self.assertEqual("".join(classes), "HELLO")
+        digit_classes, _ = ocr_chars.do_ocr_multi_class(region, "digits")
+        self.assertTrue(all(c in ocr_chars.DIGITS for c in digit_classes))
+
+    def test_do_ocr_requires_valid_handle(self):
+        interpreter = HDevInterpreter(base_image=np.full((64, 64, 3), 255, dtype=np.uint8))
+        res = interpreter.execute_script("threshold (Image, Region, 0, 10)\nconnection (Region, Conn)\ndo_ocr_multi_class_mlp (Conn, Image, 99, Class, Conf)")
+        self.assertFalse(res["success"])
+
     def test_disp_message_cleared_by_dev_clear_window(self):
         interpreter = HDevInterpreter(base_image=np.full((64, 64, 3), 200, dtype=np.uint8))
         interpreter.execute_script("dev_open_window (0, 0, 64, 64, 'black', W)\ndisp_message (W, 'hi', 'window', 5, 5, 'red', 'true')")

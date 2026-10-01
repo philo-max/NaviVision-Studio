@@ -1,11 +1,11 @@
 """
 字符识别分类器: HALCON read_ocr_class_mlp / do_ocr_multi_class_mlp 的平替。
-训练样本在首次使用时由多种字体合成 (OpenCV Hershey 字体必有, 安装了 Pillow 时追加系统字体),
+按字库文件名选择字符集 (数字 / 大写字母 / 混合), 训练样本在首次使用时由多种字体合成 (OpenCV Hershey 字体必有, 安装了 Pillow 时追加系统字体),
 以 kNN 对归一化后的二值字形分类, 不依赖外部 OCR 引擎。
 """
 
 import os
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -13,7 +13,13 @@ import numpy as np
 from core.operators import connection
 from core.types import Region
 
-CHARSET = "0123456789X"
+DIGITS = "0123456789X"
+LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ALNUM = "0123456789" + LETTERS
+DEFAULT_CHARSET_NAME = "alnum"
+LETTER_TO_DIGIT = {"O": "0", "I": "1", "S": "5", "Z": "2", "B": "8"}
+DIGIT_TO_LETTER = {v: k for k, v in LETTER_TO_DIGIT.items()}
+CHARSETS = {"digits": DIGITS, "letters": LETTERS, "alnum": ALNUM}
 GLYPH_W = 20
 GLYPH_H = 28
 KNN_K = 3
@@ -31,7 +37,7 @@ _SYSTEM_FONT_FILES = ("arial.ttf", "arialbd.ttf", "cour.ttf", "courbd.ttf", "ver
 _SYSTEM_FONT_DIRS = (r"C:\Windows\Fonts", "/usr/share/fonts/truetype/dejavu", "/Library/Fonts")
 _PIL_FONT_SIZES = (24, 36, 48)
 
-_classifier_cache: Optional["DigitClassifier"] = None
+_classifier_cache: Dict[str, "CharClassifier"] = {}
 
 
 def _normalize_glyph(binary: np.ndarray) -> Optional[np.ndarray]:
@@ -56,9 +62,9 @@ def _binarize_rendered(gray: np.ndarray) -> np.ndarray:
     return (gray > 127).astype(np.uint8) * 255
 
 
-def _render_hershey_samples() -> List[Tuple[str, np.ndarray]]:
+def _render_hershey_samples(charset: str) -> List[Tuple[str, np.ndarray]]:
     samples = []
-    for ch in CHARSET:
+    for ch in charset:
         for font in _HERSHEY_FONTS:
             for thickness in _HERSHEY_THICKNESSES:
                 canvas = np.zeros((80, 80), dtype=np.uint8)
@@ -79,7 +85,7 @@ def _find_system_fonts() -> List[str]:
     return found
 
 
-def _render_system_font_samples() -> List[Tuple[str, np.ndarray]]:
+def _render_system_font_samples(charset: str) -> List[Tuple[str, np.ndarray]]:
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -91,7 +97,7 @@ def _render_system_font_samples() -> List[Tuple[str, np.ndarray]]:
                 font = ImageFont.truetype(font_path, size)
             except OSError:
                 continue
-            for ch in CHARSET:
+            for ch in charset:
                 img = Image.new("L", (size * 2, size * 2), 0)
                 ImageDraw.Draw(img).text((size // 2, size // 4), ch, fill=255, font=font)
                 feat = _normalize_glyph(_binarize_rendered(np.array(img)))
@@ -100,12 +106,13 @@ def _render_system_font_samples() -> List[Tuple[str, np.ndarray]]:
     return samples
 
 
-class DigitClassifier:
+class CharClassifier:
     """kNN 字符分类器 (对应 HALCON 的 OCR 分类器句柄)"""
 
-    def __init__(self):
-        samples = _render_hershey_samples() + _render_system_font_samples()
-        self.labels = np.array([CHARSET.index(ch) for ch, _ in samples], dtype=np.int32)
+    def __init__(self, charset: str):
+        self.charset = charset
+        samples = _render_hershey_samples(charset) + _render_system_font_samples(charset)
+        self.labels = np.array([charset.index(ch) for ch, _ in samples], dtype=np.int32)
         features = np.stack([f for _, f in samples]).astype(np.float32)
         self.knn = cv2.ml.KNearest_create()
         self.knn.train(features, cv2.ml.ROW_SAMPLE, self.labels)
@@ -119,14 +126,21 @@ class DigitClassifier:
         votes = neighbours[0].astype(np.int32)
         winner = int(np.bincount(votes).argmax())
         confidence = float(np.mean(votes == winner))
-        return CHARSET[winner], round(confidence, 3)
+        return self.charset[winner], round(confidence, 3)
 
 
-def get_classifier() -> DigitClassifier:
-    global _classifier_cache
-    if _classifier_cache is None:
-        _classifier_cache = DigitClassifier()
-    return _classifier_cache
+def charset_name_for_library(library_file: str) -> str:
+    """由 HALCON 字库文件名推断字符集: 仅含 0-9 -> 数字; 其余 (A-Z / 混合 / 未知) -> 数字+字母"""
+    name = str(library_file).upper()
+    if "0-9" in name and "A-Z" not in name:
+        return "digits"
+    return DEFAULT_CHARSET_NAME
+
+
+def get_classifier(charset_name: str = DEFAULT_CHARSET_NAME) -> CharClassifier:
+    if charset_name not in _classifier_cache:
+        _classifier_cache[charset_name] = CharClassifier(CHARSETS[charset_name])
+    return _classifier_cache[charset_name]
 
 
 def _reading_order(objects) -> List:
@@ -147,9 +161,20 @@ def _reading_order(objects) -> List:
     return [o for line in lines for o in sorted(line, key=lambda o: o.centroid[1])]
 
 
-def do_ocr_multi_class(region: Region) -> Tuple[List[str], List[float]]:
+def _resolve_confusables(classes: List[str]) -> List[str]:
+    """混合字符集下按整串上下文消除 0/O、1/I、5/S、2/Z、8/B 的歧义: 数字占多数则统一取数字, 字母占多数则统一取字母"""
+    digits = sum(1 for c in classes if c.isdigit() and c not in DIGIT_TO_LETTER)
+    letters = sum(1 for c in classes if c.isalpha() and c not in LETTER_TO_DIGIT)
+    if digits > letters:
+        return [LETTER_TO_DIGIT.get(c, c) for c in classes]
+    if letters > digits:
+        return [DIGIT_TO_LETTER.get(c, c) for c in classes]
+    return classes
+
+
+def do_ocr_multi_class(region: Region, charset_name: str = DEFAULT_CHARSET_NAME) -> Tuple[List[str], List[float]]:
     """对 Region 中每个连通域单独分类, 按阅读顺序返回 (Class 列表, Confidence 列表)"""
-    classifier = get_classifier()
+    classifier = get_classifier(charset_name)
     connected = region if region.is_connected else connection(region)
     classes: List[str] = []
     confidences: List[float] = []
@@ -159,4 +184,6 @@ def do_ocr_multi_class(region: Region) -> Tuple[List[str], List[float]]:
         ch, conf = classifier.classify(glyph)
         classes.append(ch)
         confidences.append(conf)
+    if charset_name == DEFAULT_CHARSET_NAME:
+        classes = _resolve_confusables(classes)
     return classes, confidences
