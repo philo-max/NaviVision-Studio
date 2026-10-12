@@ -250,6 +250,111 @@ def morphology(
     return Region(mask=new_mask, is_connected=False)
 
 
+def gen_ellipse_region(
+    shape: Tuple[int, int],
+    row: float,
+    col: float,
+    phi: float,
+    radius1: float,
+    radius2: float
+) -> Region:
+    """HALCON gen_ellipse: 以 (row, col) 为中心, radius1 沿 phi 方向 (逆时针, 弧度), radius2 垂直于它"""
+    h, w = int(shape[0]), int(shape[1])
+    r1, r2 = int(round(radius1)), int(round(radius2))
+    if r1 < 1 or r2 < 1:
+        raise ValueError("gen_ellipse 的 Radius1 / Radius2 必须 >= 1")
+    cy, cx = int(round(row)), int(round(col))
+    reach = max(r1, r2)
+    if cy - reach < 0 or cx - reach < 0 or cy + reach >= h or cx + reach >= w:
+        raise ValueError(
+            f"gen_ellipse 椭圆 (中心 {cy},{cx}, 半径 {r1},{r2}) 超出 {h}x{w} 图像范围, 请移动中心或减小半径"
+        )
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.ellipse(mask, (cx, cy), (r1, r2), -float(np.degrees(phi)), 0, 360, 255, -1)
+    return Region(mask=mask, is_connected=False)
+
+
+def _kernel_morphology(
+    mask: np.ndarray,
+    op_type: str,
+    kernel: np.ndarray,
+    anchor: Tuple[int, int],
+    iterations: int = 1
+) -> np.ndarray:
+    """按 HALCON 语义 (结构元素不翻转的 Minkowski 运算) 对掩膜做 dilation / erosion / opening / closing"""
+    kh, kw = kernel.shape
+    flipped = kernel[::-1, ::-1].copy()
+    flipped_anchor = (kw - 1 - anchor[0], kh - 1 - anchor[1])
+
+    def erode(m):
+        return cv2.erode(m, kernel, anchor=anchor, iterations=iterations)
+
+    def dilate(m):
+        return cv2.dilate(m, flipped, anchor=flipped_anchor, iterations=iterations)
+
+    if op_type == "erosion":
+        return erode(mask)
+    if op_type == "dilation":
+        return dilate(mask)
+    if op_type == "opening":
+        return dilate(erode(mask))
+    if op_type == "closing":
+        return erode(dilate(mask))
+    raise ValueError(f"未知形态学类型 '{op_type}'")
+
+
+def _finish_morphology(region: Region, new_mask: np.ndarray) -> Region:
+    if region.is_connected:
+        return connection(Region(mask=new_mask), connectivity=8)
+    return Region(mask=new_mask, is_connected=False)
+
+
+def morphology_rectangle(region: Region, op_type: str, width: int, height: int) -> Region:
+    """HALCON *_rectangle1: 宽 width、高 height 的矩形结构元素, 参考点为矩形中心"""
+    width, height = int(width), int(height)
+    if width < 1 or height < 1:
+        raise ValueError("矩形结构元素的 Width / Height 必须 >= 1")
+    kernel = np.ones((height, width), dtype=np.uint8)
+    new_mask = _kernel_morphology(region.mask, op_type, kernel, (width // 2, height // 2))
+    return _finish_morphology(region, new_mask)
+
+
+def morphology_struct_element(
+    region: Region,
+    struct_element: Region,
+    op_type: str,
+    iterations: int = 1,
+    reference: Optional[Tuple[float, float]] = None
+) -> Region:
+    """
+    HALCON erosion1/2, dilation1/2, opening, closing: 以任意区域作结构元素。
+    默认参考点为结构元素重心 (erosion1/dilation1); reference=(row, col) 对应 erosion2/dilation2,
+    坐标与结构元素区域处于同一坐标系。开/闭运算与参考点无关。
+    """
+    ys, xs = np.nonzero(struct_element.mask)
+    if ys.size == 0:
+        raise ValueError("结构元素为空区域")
+    iterations = max(1, int(iterations))
+    y0, x0 = int(ys.min()), int(xs.min())
+    kernel = (struct_element.mask[y0:int(ys.max()) + 1, x0:int(xs.max()) + 1] > 0).astype(np.uint8)
+    cy, cx = float(ys.mean()), float(xs.mean())
+    anchor = (
+        min(max(int(round(cx)) - x0, 0), kernel.shape[1] - 1),
+        min(max(int(round(cy)) - y0, 0), kernel.shape[0] - 1),
+    )
+    new_mask = _kernel_morphology(region.mask, op_type, kernel, anchor, iterations)
+
+    if reference is not None and op_type in ("erosion", "dilation"):
+        d_row = (float(reference[0]) - cy) * iterations
+        d_col = (float(reference[1]) - cx) * iterations
+        sign = 1 if op_type == "erosion" else -1
+        shift = np.float32([[1, 0, sign * round(d_col)], [0, 1, sign * round(d_row)]])
+        new_mask = cv2.warpAffine(
+            new_mask, shift, (new_mask.shape[1], new_mask.shape[0]), flags=cv2.INTER_NEAREST
+        )
+    return _finish_morphology(region, new_mask)
+
+
 def filter_image(
     img: np.ndarray,
     filter_type: str = "gaussian",

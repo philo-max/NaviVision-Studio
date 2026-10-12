@@ -539,6 +539,103 @@ class TestHDevelopEngine(unittest.TestCase):
         bad = HDevInterpreter().execute_script("gen_rectangle1 (ROI, 0, 0, 5, 5)")
         self.assertFalse(bad["success"])
 
+    def _morph_image(self):
+        img = np.full((200, 300, 3), 255, dtype=np.uint8)
+        img[60:140, 80:220] = 0
+        return img
+
+    def _bbox(self, interpreter, var):
+        ys, xs = np.nonzero(interpreter.iconic_vars[var].mask)
+        return ys.min(), xs.min(), ys.max(), xs.max()
+
+    def test_get_image_size_and_gen_ellipse(self):
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script("get_image_size (Image, Width, Height)\ngen_ellipse (Ellipse, 100, 100, 0, 13, 11)")
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual((it.control_vars["Width"], it.control_vars["Height"]), (300, 200))
+        self.assertEqual(self._bbox(it, "Ellipse"), (89, 87, 111, 113))
+        too_big = HDevInterpreter(base_image=self._morph_image()).execute_script("gen_ellipse (E, 5, 5, 0, 13, 11)")
+        self.assertFalse(too_big["success"])
+
+    def test_rectangle1_morphology_changes_extent_exactly(self):
+        script = "threshold (Image, Region, 0, 10)\n{op} (Region, Out, 11, 13)"
+        for op, expected in (
+            ("erosion_rectangle1", (66, 85, 133, 214)),
+            ("dilation_rectangle1", (54, 75, 145, 224)),
+        ):
+            it = HDevInterpreter(base_image=self._morph_image())
+            res = it.execute_script(script.format(op=op))
+            self.assertTrue(res["success"], res.get("error"))
+            self.assertEqual(self._bbox(it, "Out"), expected, op)
+
+    def test_struct_element_matches_rectangle_equivalent(self):
+        base = "threshold (Image, Region, 0, 10)\n"
+        ref = HDevInterpreter(base_image=self._morph_image())
+        ref.execute_script(base + "erosion_circle (Region, Out, 5)")
+        for line in ("erosion1 (Region, Ellipse, Out, 1)", "erosion2 (Region, Ellipse, Out, 100, 100, 1)"):
+            it = HDevInterpreter(base_image=self._morph_image())
+            res = it.execute_script(base + "gen_ellipse (Ellipse, 100, 100, 0, 5, 5)\n" + line)
+            self.assertTrue(res["success"], res.get("error"))
+            self.assertEqual(self._bbox(it, "Out"), self._bbox(ref, "Out"), line)
+
+    def test_dilation2_reference_point_shifts_result(self):
+        script = (
+            "threshold (Image, Region, 0, 10)\n"
+            "gen_ellipse (Ellipse, 100, 100, 0, 5, 5)\n"
+            "dilation1 (Region, Ellipse, Centered, 1)\n"
+            "dilation2 (Region, Ellipse, Shifted, 90, 100, 1)"
+        )
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        r0, c0, r1, c1 = self._bbox(it, "Centered")
+        self.assertEqual(self._bbox(it, "Shifted"), (r0 + 10, c0, r1 + 10, c1))
+
+    def test_opening_removes_speckle_closing_fills_hole(self):
+        img = self._morph_image()
+        img[10:12, 10:12] = 0
+        img[95:100, 140:145] = 255
+        script = (
+            "threshold (Image, Region, 0, 10)\n"
+            "gen_ellipse (Ellipse, 100, 100, 0, 6, 6)\n"
+            "opening (Region, Ellipse, Opened)\n"
+            "closing (Region, Ellipse, Closed)\n"
+            "opening_rectangle1 (Region, OpenedRect, 5, 5)\n"
+            "closing_rectangle1 (Region, ClosedRect, 9, 9)"
+        )
+        it = HDevInterpreter(base_image=img)
+        res = it.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        for var in ("Opened", "OpenedRect"):
+            self.assertFalse(it.iconic_vars[var].mask[10:12, 10:12].any(), var)
+        for var in ("Closed", "ClosedRect"):
+            self.assertTrue(it.iconic_vars[var].mask[95:100, 140:145].all(), var)
+
+    def test_exercise_scripts_run_end_to_end(self):
+        script = (
+            "rgb1_to_gray (Image, GrayImage)\n"
+            "get_image_size (GrayImage, Width, Height)\n"
+            "dev_open_window (0, 0, Width / 2, Height / 2, 'black', WindowID)\n"
+            "dev_display (GrayImage)\n"
+            "threshold (GrayImage, Regions, 134, 239)\n"
+            "erosion_circle (Regions, RegionErosion, 11)\n"
+            "erosion_rectangle1 (Regions, RegionErosion1, 11, 13)\n"
+            "gen_ellipse (Ellipse, 100, 100, 0, 13, 11)\n"
+            "erosion1 (Regions, Ellipse, RegionErosion2, 1)\n"
+            "erosion2 (Regions, Ellipse, RegionErosion3, 0, 0, 1)\n"
+            "dilation1 (Regions, Ellipse, RegionDilation2, 1)\n"
+            "dilation2 (Regions, Ellipse, RegionDilation3, 0, 0, 1)\n"
+            "opening_circle (Regions, RegionOpening, 11)\n"
+            "opening (Regions, Ellipse, RegionOpening2)\n"
+            "closing_circle (Regions, RegionClosing, 7)\n"
+            "closing (Regions, Ellipse, RegionClosing2)\n"
+            "dev_display (RegionClosing2)"
+        )
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertFalse([line for line in it.stdout if "跳过执行" in line])
+
     def test_select_obj_in_loop_collects_areas(self):
         card_path = str(self.project_root / "samples" / "social_card.png").replace("\\", "/")
         script = (

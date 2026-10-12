@@ -96,6 +96,14 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "erosion_rectangle1": (["Region"], ["RegionErosion"], ["Width", "Height"], []),
     "opening_rectangle1": (["Region"], ["RegionOpening"], ["Width", "Height"], []),
     "closing_rectangle1": (["Region"], ["RegionClosing"], ["Width", "Height"], []),
+    "erosion1": (["Region", "StructElement"], ["RegionErosion"], ["Iterations"], []),
+    "erosion2": (["Region", "StructElement"], ["RegionErosion"], ["Row", "Column", "Iterations"], []),
+    "dilation1": (["Region", "StructElement"], ["RegionDilation"], ["Iterations"], []),
+    "dilation2": (["Region", "StructElement"], ["RegionDilation"], ["Row", "Column", "Iterations"], []),
+    "opening": (["Region", "StructElement"], ["RegionOpening"], [], []),
+    "closing": (["Region", "StructElement"], ["RegionClosing"], [], []),
+    "gen_ellipse": ([], ["Ellipse"], ["Row", "Column", "Phi", "Radius1", "Radius2"], []),
+    "get_image_size": (["Image"], [], [], ["Width", "Height"]),
     "mean_image": (["Image"], ["ImageMean"], ["MaskWidth", "MaskHeight"], []),
     "gauss_filter": (["Image"], ["ImageGauss"], ["Size"], []),
     "median_image": (["Image"], ["ImageMedian"], ["MaskType", "Radius", "Margin"], []),
@@ -900,6 +908,76 @@ class HDevInterpreter:
             self.iconic_vars[out_name] = m_reg
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] {op}: 半径={radius} 形态学处理生成 '{out_name}'")
+
+        # 7b. 矩形结构元素形态学: *_rectangle1 (Region, Out, Width, Height)
+        elif op in ("dilation_rectangle1", "erosion_rectangle1", "opening_rectangle1", "closing_rectangle1"):
+            in_name = i_in[0] if i_in else "Region"
+            out_name = i_out[0] if i_out else "RegionMorph"
+            if len(c_in) < 2:
+                raise ValueError(f"{op} 需要 2 个参数: Width, Height")
+            width, height = int(c_in[0]), int(c_in[1])
+            src_reg = self.iconic_vars.get(in_name)
+            if not isinstance(src_reg, Region):
+                raise ValueError(f"输入对象 '{in_name}' 不是有效的 Region")
+            self.iconic_vars[out_name] = ops.morphology_rectangle(src_reg, op.split("_")[0], width, height)
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] {op}: 矩形 {width}x{height} 形态学处理生成 '{out_name}'")
+
+        # 7c. 自定义结构元素形态学: erosion1/2, dilation1/2, opening, closing (Region, StructElement, Out, ...)
+        elif op in ("erosion1", "erosion2", "dilation1", "dilation2", "opening", "closing"):
+            in_name = i_in[0] if len(i_in) > 0 else "Region"
+            se_name = i_in[1] if len(i_in) > 1 else "StructElement"
+            out_name = i_out[0] if i_out else "RegionMorph"
+            src_reg = self.iconic_vars.get(in_name)
+            struct_elem = self.iconic_vars.get(se_name)
+            if not isinstance(src_reg, Region):
+                raise ValueError(f"输入对象 '{in_name}' 不是有效的 Region")
+            if not isinstance(struct_elem, Region):
+                raise ValueError(f"结构元素 '{se_name}' 不是有效的 Region")
+            op_type = op.rstrip("12")
+            reference = None
+            iterations = 1
+            if op.endswith("2"):
+                if len(c_in) < 2:
+                    raise ValueError(f"{op} 需要参考点参数: Row, Column[, Iterations]")
+                reference = (float(c_in[0]), float(c_in[1]))
+                iterations = int(c_in[2]) if len(c_in) > 2 else 1
+            elif op.endswith("1"):
+                iterations = int(c_in[0]) if c_in else 1
+            self.iconic_vars[out_name] = ops.morphology_struct_element(
+                src_reg, struct_elem, op_type, iterations=iterations, reference=reference
+            )
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] {op}: 以 '{se_name}' 为结构元素 (迭代 {iterations} 次) 生成 '{out_name}'")
+
+        # 7d. gen_ellipse (Ellipse, Row, Column, Phi, Radius1, Radius2)
+        elif op == "gen_ellipse":
+            out_name = i_out[0] if i_out else "Ellipse"
+            if len(c_in) < 5:
+                raise ValueError("gen_ellipse 需要 5 个参数: Row, Column, Phi, Radius1, Radius2")
+            row, col, phi, radius1, radius2 = (float(v) for v in c_in[:5])
+            base = next((v for v in reversed(list(self.iconic_vars.values())) if isinstance(v, np.ndarray)), None)
+            if base is None:
+                raise ValueError("gen_ellipse 之前需要先 read_image 载入图像以确定画布尺寸")
+            self.iconic_vars[out_name] = ops.gen_ellipse_region(base.shape[:2], row, col, phi, radius1, radius2)
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] gen_ellipse: 椭圆中心 ({row:g},{col:g}), 半径 {radius1:g}/{radius2:g} -> '{out_name}'")
+
+        # 7e. get_image_size (Image, Width, Height)
+        elif op == "get_image_size":
+            in_name = i_in[0] if i_in else "Image"
+            src = self.iconic_vars.get(in_name)
+            if isinstance(src, Region):
+                shape = src.mask.shape
+            elif isinstance(src, np.ndarray):
+                shape = src.shape
+            else:
+                raise ValueError(f"未找到输入图像 '{in_name}'")
+            width_var = c_out[0] if len(c_out) > 0 else "Width"
+            height_var = c_out[1] if len(c_out) > 1 else "Height"
+            self.control_vars[width_var] = int(shape[1])
+            self.control_vars[height_var] = int(shape[0])
+            self.log(f"  [{inst.line_num}] get_image_size: {width_var}={shape[1]}, {height_var}={shape[0]}")
 
         # 8. 平滑滤波: mean_image, gauss_filter, median_image
         elif op in ("mean_image", "gauss_filter", "median_image"):
