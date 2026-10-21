@@ -1,0 +1,39 @@
+*==================== 练习三拓展：汉字 + 字母 + 数字混合训练 ====================
+dev_close_window ()
+read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/L8_plate_jing.jpg')
+get_image_size (Image, Width, Height)
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+rgb1_to_gray (Image, GrayImage)
+
+*字符分割：自动阈值 + 膨胀把汉字的偏旁连起来 + 连通域 + 从左到右排序
+char_threshold (GrayImage, GrayImage, Characters, 2, 95, Threshold)
+*汉字“京”上下两部分之间的缝隙较宽，用窄而高的膨胀核 (3 x 9) 才能连成一个字
+dilation_rectangle1 (Characters, RegionDilation, 3, 9)
+connection (RegionDilation, ConnectedRegions)
+sort_region (ConnectedRegions, SortedRegions, 'character', 'true', 'row')
+count_obj (SortedRegions, Number)
+
+*要训练的字符内容，一个区域对应一个字符
+words := ['京','A','T','0','H','6','9']
+transfile := 'plate.trf'
+for Index := 1 to Number by 1
+    select_obj (SortedRegions, ObjectSelected, Index)
+    reduce_domain (GrayImage, ObjectSelected, ImageReduced)
+    append_ocr_trainf (ObjectSelected, ImageReduced, words[Index - 1], transfile)
+endfor
+read_ocr_trainf_names (transfile, CharacterNames, CharacterCount)
+create_ocr_class_mlp (8, 10, 'constant', 'default', CharacterNames, 80, 'none', 10, 42, OCRHandle)
+trainf_ocr_class_mlp (OCRHandle, transfile, 200, 1, 0.01, Error, ErrorLog)
+write_ocr_class_mlp (OCRHandle, 'plate.omc')
+clear_ocr_class_mlp (OCRHandle)
+
+*读取训练好的分类器，识别同一张图并显示
+read_ocr_class_mlp ('plate.omc', OCRHandle1)
+do_ocr_multi_class_mlp (SortedRegions, GrayImage, OCRHandle1, Class, Confidence)
+dev_display (Image)
+dev_set_color ('green')
+dev_display (SortedRegions)
+smallest_rectangle1 (SortedRegions, Row1, Column1, Row2, Column2)
+for Index := 0 to |Class| - 1 by 1
+    disp_message (WindowHandle, Class[Index], 'image', Row2[Index] + 4, Column1[Index], 'red', 'false')
+endfor

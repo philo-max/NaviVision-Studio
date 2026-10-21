@@ -1,0 +1,43 @@
+*==================== 考核第 1 步：基础流程（不矫正，用内置字库）====================
+dev_close_window ()
+read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/wangzetong.png')
+rgb1_to_gray (Image, GrayImage)
+get_image_size (GrayImage, Width, Height)
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+dev_display (GrayImage)
+
+*两行文字各给一个矩形区域（原图文字略有倾斜，两行贴得很近，只能靠位置分开）
+gen_rectangle1 (Line1Area, 108, 150, 166, 530)
+gen_rectangle1 (Line2Area, 167, 150, 214, 530)
+reduce_domain (GrayImage, Line1Area, Line1Gray)
+reduce_domain (GrayImage, Line2Area, Line2Gray)
+*双峰阈值取暗点，再把每个字符的点膨胀连成一块
+binary_threshold (Line1Gray, Line1Dots, 'max_separability', 'dark', Threshold1)
+binary_threshold (Line2Gray, Line2Dots, 'max_separability', 'dark', Threshold2)
+dilation_rectangle1 (Line1Dots, Line1Chars, 7, 9)
+dilation_rectangle1 (Line2Dots, Line2Chars, 3, 9)
+connection (Line1Chars, Line1Conn)
+connection (Line2Chars, Line2Conn)
+select_shape (Line1Conn, Line1Sel, 'area', 'and', 150, 99999)
+select_shape (Line2Conn, Line2Sel, 'area', 'and', 100, 99999)
+sort_region (Line1Sel, Line1Sorted, 'character', 'true', 'row')
+sort_region (Line2Sel, Line2Sorted, 'character', 'true', 'row')
+
+*内置字库识别：第一行是数字，第二行是数字+字母
+read_ocr_class_mlp ('Industrial_0-9+_NoRej.omc', DigitHandle)
+read_ocr_class_mlp ('Industrial_0-9A-Z_NoRej.omc', AlnumHandle)
+do_ocr_multi_class_mlp (Line1Sorted, Line1Gray, DigitHandle, Class1, Confidence1)
+do_ocr_multi_class_mlp (Line2Sorted, Line2Gray, AlnumHandle, Class2, Confidence2)
+
+*显示：每个字符的识别结果写在它下面
+dev_set_color ('green')
+dev_display (Line1Sorted)
+dev_display (Line2Sorted)
+smallest_rectangle1 (Line1Sorted, Row11, Column11, Row21, Column21)
+smallest_rectangle1 (Line2Sorted, Row12, Column12, Row22, Column22)
+for Index := 0 to |Class1| - 1 by 1
+    disp_message (WindowHandle, Class1[Index], 'image', Row11[Index] - 32, Column11[Index], 'red', 'true')
+endfor
+for Index := 0 to |Class2| - 1 by 1
+    disp_message (WindowHandle, Class2[Index], 'image', Row22[Index], Column12[Index], 'red', 'true')
+endfor

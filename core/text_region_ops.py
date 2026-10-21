@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from core.operators import connection
+from core.operators import connection, halcon_phi
 from core.types import Region, RegionObject
 
 LINE_GAP_FACTOR = 0.5
@@ -37,6 +37,43 @@ def smallest_rectangle1(region: Region) -> Tuple[List[int], List[int], List[int]
         rows2.append(r1 - 1)
         cols2.append(c1 - 1)
     return rows1, cols1, rows2, cols2
+
+
+def _object_points(region: Region) -> List[np.ndarray]:
+    """每个目标 (没打散的区域视为一个目标) 的像素点坐标, 形状 (N, 2), 列为 (x=列, y=行)"""
+    if region.objects:
+        groups = []
+        for obj in region.objects:
+            ys, xs = np.nonzero(obj.bbox_mask(region.mask))
+            groups.append(np.stack([xs + obj.bbox[1], ys + obj.bbox[0]], axis=1).astype(np.float32))
+        return groups
+    ys, xs = np.nonzero(region.mask)
+    return [np.stack([xs, ys], axis=1).astype(np.float32)] if ys.size else []
+
+
+def smallest_rectangle2(region: Region) -> Tuple[List[float], List[float], List[float], List[float], List[float]]:
+    """HALCON smallest_rectangle2: 每个目标的最小外接旋转矩形, 返回 Row, Column, Phi, Length1, Length2"""
+    rows, cols, phis, len1, len2 = [], [], [], [], []
+    for pts in _object_points(region):
+        rect = cv2.minAreaRect(pts)
+        (cx, cy), (w, h), _ = rect
+        rows.append(float(cy))
+        cols.append(float(cx))
+        phis.append(halcon_phi(cv2.boxPoints(rect)))
+        len1.append(float(max(w, h) / 2.0))
+        len2.append(float(min(w, h) / 2.0))
+    return rows, cols, phis, len1, len2
+
+
+def smallest_circle(region: Region) -> Tuple[List[float], List[float], List[float]]:
+    """HALCON smallest_circle: 每个目标的最小外接圆, 返回 Row, Column, Radius"""
+    rows, cols, radii = [], [], []
+    for pts in _object_points(region):
+        (cx, cy), radius = cv2.minEnclosingCircle(pts)
+        rows.append(float(cy))
+        cols.append(float(cx))
+        radii.append(float(radius))
+    return rows, cols, radii
 
 
 def _cluster_lines(objects: List[RegionObject], axis: int) -> List[List[RegionObject]]:

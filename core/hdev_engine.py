@@ -25,7 +25,7 @@ from core import hdev_expr
 from core import hdev_geometry
 from core.shape_model import ShapeModel, create_shape_model as build_shape_model
 from core.shape_search import find_shape_models
-from core import ocr_mlp, text_region_ops, workspace
+from core import file_ops, ocr_mlp, text_region_ops, workspace
 from core.ocr_mlp import TrainedOcrClassifier
 from core.pipeline import encode_image_base64, create_colored_label_mask
 
@@ -240,6 +240,8 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "fwrite_string": ([], [], ["FileHandle", "String"], []),
     "fnew_line": ([], [], ["FileHandle"], []),
     "close_file": ([], [], ["FileHandle"], []),
+    "list_files": ([], [], ["Directory", "Options"], ["Files"]),
+    "tuple_regexp_select": ([], [], ["Data", "Expression"], ["Selected"]),
     "mean_image": (["Image"], ["ImageMean"], ["MaskWidth", "MaskHeight"], []),
     "gauss_filter": (["Image"], ["ImageGauss"], ["Size"], []),
     "median_image": (["Image"], ["ImageMedian"], ["MaskType", "Radius", "Margin"], []),
@@ -379,15 +381,33 @@ class HDevParser:
             lines.append(pending)
         return lines
 
+    @staticmethod
+    def _is_single_literal(s: str) -> bool:
+        if len(s) < 2 or s[0] not in ("'", '"') or s[-1] != s[0]:
+            return False
+        quote, i = s[0], 1
+        while i < len(s) - 1:
+            if s[i] == "\\":
+                i += 2
+                continue
+            if s[i] == quote:
+                return False
+            i += 1
+        return i == len(s) - 1
+
+    @staticmethod
+    def _unescape(text: str) -> str:
+        return hdev_expr.unescape_string(text)
+
     @classmethod
     def _parse_value(cls, val_str: str) -> Any:
         """解析控制表达式的单个常量或变量字面量"""
         s = val_str.strip()
         if not s:
             return ""
-        # 字符串常量: 'foo' 或 "foo"
-        if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
-            return s[1:-1]
+        # 字符串常量: 'foo' 或 "foo" (整个参数恰好是一个引号字面量; 'a' + 'b' 这类表达式留给求值器)
+        if cls._is_single_literal(s):
+            return cls._unescape(s[1:-1])
         # 数组 / 元组常量: [1, 2, 3]
         if s.startswith("[") and s.endswith("]"):
             inner = s[1:-1].strip()
@@ -716,6 +736,7 @@ class HDevInterpreter:
         self.pc: int = 0
         self._flow: Optional[_FlowMap] = None
         self._active_loops: set = set()
+        self._loop_bounds: Dict[int, Tuple[Any, Any]] = {}
         # 默认底图注入 (注意: 不标记窗口 0 为"已使用", 否则会在多窗口场景下
         # 被误判为脚本主动打开的窗口而出现在窗口切换标签页里; 各窗口合成画面时
         # 仍会在找不到自己专属底图时回退取用这张预注入的图像, 见 _composite_window)
@@ -778,6 +799,7 @@ class HDevInterpreter:
         self.instructions = instructions
         self._flow = _FlowMap(instructions)
         self._active_loops = set()
+        self._loop_bounds = {}
 
     def _advance(self, pc: int) -> int:
         """执行 pc 处的指令并返回下一条应执行的指令下标 (处理 for/while/if 的跳转)"""
@@ -787,18 +809,21 @@ class HDevInterpreter:
         if t == "for":
             meta = inst.for_loop_meta
             if pc not in self._active_loops:
+                # HALCON 只在循环开始时计算一次上界与步长 (如 for Number := 1 to Number by 1 里的 Number)
                 self._active_loops.add(pc)
-                self.control_vars[inst.assign_var] = self._eval_expr(meta["start"])
-            step = self._eval_expr(meta["step"])
-            end = self._eval_expr(meta["end"])
+                start = self._eval_expr(meta["start"])
+                self._loop_bounds[pc] = (self._eval_expr(meta["end"]), self._eval_expr(meta["step"]))
+                self.control_vars[inst.assign_var] = start
+            end, step = self._loop_bounds[pc]
             idx = self.control_vars[inst.assign_var]
             if (step >= 0 and idx > end) or (step < 0 and idx < end):
                 self._active_loops.discard(pc)
+                self._loop_bounds.pop(pc, None)
                 return flow.end_of[pc] + 1
             return pc + 1
         if t == "endfor":
             for_pc = flow.start_of[pc]
-            step = self._eval_expr(self.instructions[for_pc].for_loop_meta["step"])
+            step = self._loop_bounds[for_pc][1]
             self.control_vars[self.instructions[for_pc].assign_var] += step
             return for_pc
         if t == "while":
@@ -965,7 +990,8 @@ class HDevInterpreter:
         op = inst.op_name.lower()
         i_in = inst.iconic_in
         i_out = inst.iconic_out
-        c_in = [self._eval_expr(x) for x in inst.control_in]
+        # HALCON 里只有一个元素的元组与单个值等价 (如 area_center 输出的 Row 可直接当标量参数), 这里统一展开
+        c_in = [self._unwrap_single(self._eval_expr(x)) for x in inst.control_in]
         c_out = inst.control_out
 
         # 1. read_image (Image, FileName)
@@ -1483,6 +1509,19 @@ class HDevInterpreter:
                 del self.open_files[handle]
                 self.log(f"  [{inst.line_num}] close_file: 已关闭文件句柄 {handle}")
 
+        # 7t. 文件列表与字符串筛选: list_files / tuple_regexp_select
+        elif op == "list_files":
+            files = file_ops.list_files(c_in[0] if c_in else "", c_in[1] if len(c_in) > 1 else "files")
+            self.control_vars[c_out[0] if c_out else "Files"] = files
+            self.log(f"  [{inst.line_num}] list_files: 找到 {len(files)} 个文件")
+
+        elif op == "tuple_regexp_select":
+            if len(c_in) < 2:
+                raise ValueError("tuple_regexp_select 需要 Data 与 Expression 两个参数")
+            selected = file_ops.regexp_select(c_in[0], c_in[1])
+            self.control_vars[c_out[0] if c_out else "Selected"] = selected
+            self.log(f"  [{inst.line_num}] tuple_regexp_select: 选出 {len(selected)} 项")
+
         # 7h. 纯显示样式设置: 区域本平台已按对象自动分色, 字体不影响计算结果
         elif op in ("dev_set_colored", "set_display_font"):
             self.log(f"  [{inst.line_num}] {op}: 仅影响显示样式, 本平台已自动处理, 无需执行")
@@ -1544,47 +1583,28 @@ class HDevInterpreter:
             src_reg = self.iconic_vars.get(in_name)
             if not isinstance(src_reg, Region):
                 raise ValueError(f"输入对象 '{in_name}' 不是有效的 Region")
-            metrics = ops.measure_region(src_reg)
-
             if op == "smallest_rectangle2" and len(c_out) >= 5:
-                # Row, Column, Phi, Length1, Length2
-                rows, cols, phis, l1s, l2s = [], [], [], [], []
-                for item in metrics.get("items", []):
-                    obb = item.get("obb", {})
-                    cols.append(obb.get("center_x", 0.0))
-                    rows.append(obb.get("center_y", 0.0))
-                    phis.append(obb.get("angle_rad", 0.0))
-                    l1s.append(obb.get("half_width", 0.0))
-                    l2s.append(obb.get("half_height", 0.0))
-                self.control_vars[c_out[0]] = rows
-                self.control_vars[c_out[1]] = cols
-                self.control_vars[c_out[2]] = phis
-                self.control_vars[c_out[3]] = l1s
-                self.control_vars[c_out[4]] = l2s
+                # Row, Column, Phi, Length1, Length2: Phi 为最长边与水平方向的夹角 (弧度, 逆时针为正)
+                for name, values in zip(c_out, text_region_ops.smallest_rectangle2(src_reg)):
+                    self.control_vars[name] = values
                 self.log(f"  [{inst.line_num}] smallest_rectangle2: 输出旋转矩形特征到变量 {c_out}")
 
             elif op == "smallest_circle" and len(c_out) >= 3:
-                rows, cols, radii = [], [], []
-                for item in metrics.get("items", []):
-                    sc = item.get("smallest_circle", {})
-                    cols.append(sc.get("center_x", 0.0))
-                    rows.append(sc.get("center_y", 0.0))
-                    radii.append(sc.get("radius", 0.0))
-                self.control_vars[c_out[0]] = rows
-                self.control_vars[c_out[1]] = cols
-                self.control_vars[c_out[2]] = radii
+                for name, values in zip(c_out, text_region_ops.smallest_circle(src_reg)):
+                    self.control_vars[name] = values
                 self.log(f"  [{inst.line_num}] smallest_circle: 输出最小外接圆特征到变量 {c_out}")
 
             elif op == "area_center" and len(c_out) >= 3:
-                areas = [obj.area for obj in src_reg.objects]
-                rows = [obj.centroid[0] for obj in src_reg.objects]
-                cols = [obj.centroid[1] for obj in src_reg.objects]
+                items = text_region_ops.region_items(src_reg)
+                areas = [area for _, area, _ in items]
+                rows = [centroid[0] for _, _, centroid in items]
+                cols = [centroid[1] for _, _, centroid in items]
                 self.control_vars[c_out[0]] = areas
                 self.control_vars[c_out[1]] = rows
                 self.control_vars[c_out[2]] = cols
                 self.log(f"  [{inst.line_num}] area_center: 输出面积与中心坐标到变量 {c_out}")
             else:
-                self.control_vars["Metrics"] = metrics
+                self.control_vars["Metrics"] = ops.measure_region(src_reg)
                 self.log(f"  [{inst.line_num}] measure_region: 计算完成并存入 Metrics")
 
         # 10c. select_obj (Objects, ObjectSelected, Index): 按 1 起始下标取出单个连通域
@@ -1949,6 +1969,10 @@ class HDevInterpreter:
             size = (max(1, round(arr.shape[1] * scale)), max(1, round(arr.shape[0] * scale)))
             arr = cv2.resize(arr, size, interpolation=cv2.INTER_AREA)
         return encode_image_base64(arr)
+
+    @staticmethod
+    def _unwrap_single(value: Any) -> Any:
+        return value[0] if isinstance(value, list) and len(value) == 1 and not isinstance(value[0], list) else value
 
     def _pin_display_object(self, overlay: List[str], name: str, obj: Any) -> None:
         """记录 dev_display 那一刻的对象快照: 同名变量被重新赋值后再次显示, 先前显示的内容仍留在叠加层里 (与 HALCON 一致)"""

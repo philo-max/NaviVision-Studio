@@ -1,0 +1,46 @@
+*读取图片
+read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/L8_digits_369.jpg')
+dev_get_window(WindowHandle)
+
+
+*绘制数字区域矩形ROI,右击结束
+*得到矩形区域	
+draw_rectangle1 (WindowHandle, Row1, Column1, Row2, Column2)
+gen_rectangle1(Rectangle1,Row1,Column1, Row2, Column2)
+*抠图
+reduce_domain(Image, Rectangle1, ImageReduced)
+*灰度化
+rgb1_to_gray(ImageReduced, GrayImage)
+
+
+*双峰二值化,取暗值
+binary_threshold(GrayImage, Region, 'max_separability', 'dark', UsedThreshold)
+*闭运算将断的区域联合
+closing_circle(Region, RegionClosing, 3.5)
+*打散
+connection(RegionClosing, ConnectedRegions)
+*根据区域面积特征筛选出数字，去掉噪声
+select_shape(ConnectedRegions, SelectedRegions, 'area', 'and', 100, 600)
+*通过设定的数字格式,赋值给句柄
+
+
+read_ocr_class_mlp('Industrial_0-9+_NoRej.omc', OCRHandle)
+
+*字符识别,输出给Class
+do_ocr_multi_class_mlp(SelectedRegions, GrayImage, OCRHandle, Class, Confidence)
+
+
+*得到元组长度，即为识别出几个数字 
+totalNum:=|Class|
+*获取每个区域的包围盒，目的是得到显示坐标
+smallest_rectangle1(SelectedRegions, Row11, Column11, Row21, Column21)
+
+
+*循环显示并存取为字符串 
+strResult:=''
+for Index := 0 to totalNum -1 by 1
+disp_message(WindowHandle, Class[ Index],'image',\ 
+Row21[Index],Column21[Index], 'red', 'true') 
+strResult:= strResult+Class[Index] 
+
+endfor

@@ -11,6 +11,7 @@ HDevelop 控制表达式求值器 (安全的 AST 解释, 不使用 eval)。
 import ast
 import math
 import operator
+import re
 from typing import Any, Callable, Dict, List
 
 _MAX_STRING_LENGTH = 100000
@@ -125,24 +126,39 @@ FUNCTIONS: Dict[str, Callable[..., Any]] = {
 CONSTANTS: Dict[str, Any] = {"true": True, "false": False, "pi": math.pi}
 
 
-def _convert_pipes(expr: str) -> str:
-    """把 HALCON 的元组长度写法 |x| 转成 tuple_length(x) (引号内的竖线保持原样)"""
+_ESCAPES = {"\\": "\\", "'": "'", '"': '"', "n": "\n", "t": "\t"}
+
+
+def unescape_string(text: str) -> str:
+    """HALCON 字符串转义：两个反斜杠得一个反斜杠，反斜杠加单引号或双引号得引号本身，反斜杠加 n 为换行，反斜杠加 t 为制表符；其它反斜杠原样保留（如 Windows 路径）"""
+    return re.sub(r"\\(.)", lambda m: _ESCAPES.get(m.group(1), m.group(0)), text, flags=re.S)
+
+
+def _normalise_source(expr: str) -> str:
+    """
+    把 HALCON 的写法整理成可交给 Python 解析器的源码: 字符串字面量按 HALCON 的转义规则解码后重新输出
+    (这样 Windows 路径里的单个反斜杠不会被当成非法的 Python 转义), 并把元组长度 |x| 转成 tuple_length(x)。
+    """
     out: List[str] = []
-    quote = None
     open_pipe = False
-    for ch in expr:
-        if quote:
-            out.append(ch)
-            if ch == quote:
-                quote = None
-        elif ch in ("'", '"'):
-            quote = ch
-            out.append(ch)
+    i, n = 0, len(expr)
+    while i < n:
+        ch = expr[i]
+        if ch in ("'", '"'):
+            j = i + 1
+            while j < n and expr[j] != ch:
+                j += 2 if expr[j] == "\\" else 1
+            if j >= n:
+                raise UnsupportedExpression("字符串没有结束引号")
+            out.append(repr(unescape_string(expr[i + 1:j])))
+            i = j + 1
         elif ch == "|":
             out.append(")" if open_pipe else "tuple_length(")
             open_pipe = not open_pipe
+            i += 1
         else:
             out.append(ch)
+            i += 1
     if open_pipe:
         raise UnsupportedExpression("表达式中的 | 没有成对出现")
     return "".join(out)
@@ -215,5 +231,5 @@ class _Evaluator:
 
 def evaluate(expr: str, names: Dict[str, Any]) -> Any:
     """求值一条 HDevelop 控制表达式; 变量未定义时抛出 NameError, 语法错误时抛出 SyntaxError"""
-    tree = ast.parse(_convert_pipes(expr.strip()), mode="eval")
+    tree = ast.parse(_normalise_source(expr.strip()), mode="eval")
     return _Evaluator(names).visit(tree)

@@ -144,6 +144,26 @@ class RegionOperatorTests(WorkspaceTestCase):
         self.assertTrue(res["success"], res.get("error"))
         self.assertEqual(int(np.count_nonzero(it.iconic_vars["D"].mask)), 20 * 20, "ROI 外被置 0 的像素不能算作暗目标")
 
+    def test_smallest_rectangle2_reports_halcon_phi_and_is_not_empty(self):
+        angle = math.radians(20)
+        centre = np.array([100.0, 150.0])
+        along = np.array([-math.sin(angle), math.cos(angle)])
+        across = np.array([math.cos(angle), math.sin(angle)])
+        corners = [centre + a * 100 * along + b * 15 * across for a, b in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        img = np.full((200, 300, 3), 255, np.uint8)
+        cv2.fillPoly(img, [np.array([[p[1], p[0]] for p in corners], np.int32)], (0, 0, 0))
+        script = ("rgb1_to_gray (Image, G)\nthreshold (G, R, 0, 50)\nsmallest_rectangle2 (R, Row, Column, Phi, L1, L2)\n"
+                  "smallest_circle (R, CRow, CColumn, Radius)\narea_center (R, Area, ARow, AColumn)")
+        it, res = self.run_script(script, image=img)
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertAlmostEqual(it.control_vars["Phi"][0], angle, delta=0.02, msg="视觉上向右上倾斜应为正角 (逆时针)")
+        self.assertAlmostEqual(it.control_vars["Row"][0], 100, delta=1.5)
+        self.assertAlmostEqual(it.control_vars["Column"][0], 150, delta=1.5)
+        self.assertAlmostEqual(it.control_vars["L1"][0], 100.8, delta=2)
+        self.assertAlmostEqual(it.control_vars["L2"][0], 15.5, delta=1.5)
+        self.assertAlmostEqual(it.control_vars["Radius"][0], 101.8, delta=2)
+        self.assertEqual(len(it.control_vars["Area"]), 1, "没打散的区域按一个对象计算")
+
     def test_char_threshold_finds_dark_characters(self):
         it, res = self.run_script(
             "rgb1_to_gray (Image, G)\nchar_threshold (G, G, Chars, 2, 95, Thr)\nconnection (Chars, C)\ncount_obj (C, N)")
@@ -176,6 +196,46 @@ class ScriptSemanticsTests(WorkspaceTestCase):
         it, res = self.run_script("P := samples/a.png\nName := 'x'")
         self.assertTrue(res["success"], res.get("error"))
         self.assertEqual(it.control_vars["P"], "samples/a.png")
+
+    def test_for_loop_bounds_are_evaluated_once_at_loop_start(self):
+        it, res = self.run_script("Number := 3\nTotal := 0\nfor Number := 1 to Number by 1\n    Total := Total + Number\nendfor")
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(it.control_vars["Total"], 6)
+        self.assertEqual(it.control_vars["Number"], 4)
+        it, res = self.run_script("N := 0\nfor I := 5 to 1 by -2\n    N := N + 1\nendfor")
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(it.control_vars["N"], 3)
+
+    def test_string_literals_follow_halcon_escapes(self):
+        bs = chr(92)
+        script = (f"Regex := '{bs}{bs}.(bmp|jpg)$'\nPath := 'C:{bs}Users{bs}a.png'\nText := 'a{bs}nb'\n"
+                  "Joined := 'x' + 'y'\nList := ['" + bs + bs + ".(bmp)$', 'ignore_case']")
+        it, res = self.run_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(it.control_vars["Regex"], bs + ".(bmp|jpg)$")
+        self.assertEqual(it.control_vars["Path"], f"C:{bs}Users{bs}a.png")
+        self.assertEqual(it.control_vars["Text"], "a\nb")
+        self.assertEqual(it.control_vars["Joined"], "xy")
+        self.assertEqual(it.control_vars["List"], [bs + ".(bmp)$", "ignore_case"])
+
+    def test_list_files_and_regexp_select(self):
+        for name in ("b.BMP", "a.jpg", "c.txt", "d.jpeg"):
+            (self.ws / name).write_text("x", encoding="utf-8")
+        folder = self.ws.as_posix()
+        bs = chr(92)
+        script = (f"list_files ('{folder}', ['files', 'follow_links'], Files)\n"
+                  f"tuple_regexp_select (Files, ['{bs}{bs}.(bmp|jpg|jpeg)$', 'ignore_case'], Images)\nN := |Images|")
+        it, res = self.run_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(it.control_vars["N"], 3)
+        self.assertEqual([p.rsplit("/", 1)[-1] for p in it.control_vars["Images"]], ["a.jpg", "b.BMP", "d.jpeg"])
+        self.assertFalse(self.run_script(f"list_files ('{folder}/nope', 'files', F)")[1]["success"])
+        self.assertFalse(self.run_script("tuple_regexp_select (['a'], '(', S)")[1]["success"])
+
+    def test_single_element_tuples_work_as_scalars(self):
+        it, res = self.run_script("Phi := [0.5]\nhom_mat2d_identity (M0)\nhom_mat2d_rotate (M0, -Phi, 10, 10, M1)\nCount := 1")
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(len(it.control_vars["M1"]), 6)
 
     def test_dev_get_window_returns_current_window(self):
         it, res = self.run_script("dev_open_window (0, 0, 10, 10, 'black', W)\ndev_get_window (Handle)")

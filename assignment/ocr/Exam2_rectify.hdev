@@ -1,0 +1,70 @@
+*==================== 考核第 2 步：加上图像矫正（仍然用内置字库）====================
+*==================== 1. 读图、灰度化、打开窗口 ====================
+dev_close_window ()
+read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/wangzetong.png')
+rgb1_to_gray (Image, GrayImage)
+get_image_size (GrayImage, Width, Height)
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+
+*==================== 2. 图像矫正：测出文字块的倾斜角，转正 ====================
+*文字所在的大致区域
+gen_rectangle1 (TextArea, 100, 150, 215, 530)
+reduce_domain (GrayImage, TextArea, GrayReduced)
+*双峰阈值，取暗的点（喷码的点）
+binary_threshold (GrayReduced, Dots, 'max_separability', 'dark', UsedThreshold)
+*把点连成一整块文字，求这一块的最小外接旋转矩形，Phi 就是倾斜角
+dilation_rectangle1 (Dots, DotsDilated, 25, 11)
+connection (DotsDilated, Blocks)
+select_shape (Blocks, TextBlock, 'area', 'and', 3000, 99999)
+smallest_rectangle2 (TextBlock, BlockRow, BlockColumn, BlockPhi, BlockL1, BlockL2)
+*绕文字块中心反向旋转 Phi，把文字转水平
+hom_mat2d_identity (HomMat2DIdentity)
+hom_mat2d_rotate (HomMat2DIdentity, -BlockPhi, BlockRow, BlockColumn, HomMat2DRotate)
+affine_trans_image (GrayImage, GrayRect, HomMat2DRotate, 'bilinear', 'false')
+dev_display (GrayRect)
+
+*==================== 3. 分行：每一行文字单独处理 ====================
+reduce_domain (GrayRect, TextArea, GrayRectReduced)
+binary_threshold (GrayRectReduced, DotsRect, 'max_separability', 'dark', UsedThreshold2)
+*校正后两行文字之间有一段没有点的空行：横向拉长、竖向只补一个空行，就得到两条“行带”，按从上到下排序
+dilation_rectangle1 (DotsRect, LineBandsRaw, 61, 3)
+connection (LineBandsRaw, LineBands)
+select_shape (LineBands, LineBandsBig, 'area', 'and', 5000, 999999)
+sort_region (LineBandsBig, LineBandsSorted, 'upper_left', 'true', 'row')
+select_obj (LineBandsSorted, Band1, 1)
+select_obj (LineBandsSorted, Band2, 2)
+intersection (DotsRect, Band1, Line1Dots)
+intersection (DotsRect, Band2, Line2Dots)
+
+*==================== 4. 分字：把一个字符的点连成一块 ====================
+*矫正之后两行用同一个膨胀核就能把每个字符的点连成一块（宽 3、高 9）
+dilation_rectangle1 (Line1Dots, Line1Chars, 3, 9)
+connection (Line1Chars, Line1Conn)
+select_shape (Line1Conn, Line1Sel, 'area', 'and', 100, 99999)
+sort_region (Line1Sel, Line1Sorted, 'character', 'true', 'row')
+dilation_rectangle1 (Line2Dots, Line2Chars, 3, 9)
+connection (Line2Chars, Line2Conn)
+select_shape (Line2Conn, Line2Sel, 'area', 'and', 100, 99999)
+sort_region (Line2Sel, Line2Sorted, 'character', 'true', 'row')
+count_obj (Line1Sorted, Number1)
+count_obj (Line2Sorted, Number2)
+
+*==================== 5. 内置字库识别 ====================
+read_ocr_class_mlp ('Industrial_0-9+_NoRej.omc', DigitHandle)
+read_ocr_class_mlp ('Industrial_0-9A-Z_NoRej.omc', AlnumHandle)
+do_ocr_multi_class_mlp (Line1Sorted, GrayRect, DigitHandle, Class1, Confidence1)
+do_ocr_multi_class_mlp (Line2Sorted, GrayRect, AlnumHandle, Class2, Confidence2)
+
+*==================== 6. 显示：每个字符的识别结果写在它下面 ====================
+dev_display (GrayRect)
+dev_set_color ('green')
+dev_display (Line1Sorted)
+dev_display (Line2Sorted)
+smallest_rectangle1 (Line1Sorted, Row11, Column11, Row21, Column21)
+smallest_rectangle1 (Line2Sorted, Row12, Column12, Row22, Column22)
+for Index := 0 to |Class1| - 1 by 1
+    disp_message (WindowHandle, Class1[Index], 'image', Row11[Index] - 32, Column11[Index], 'red', 'true')
+endfor
+for Index := 0 to |Class2| - 1 by 1
+    disp_message (WindowHandle, Class2[Index], 'image', Row22[Index], Column12[Index], 'red', 'true')
+endfor

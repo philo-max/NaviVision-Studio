@@ -1,0 +1,105 @@
+*==================== 1. 读图、灰度化、打开窗口 ====================
+dev_close_window ()
+read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/wangzetong.png')
+rgb1_to_gray (Image, GrayImage)
+get_image_size (GrayImage, Width, Height)
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+
+*==================== 2. 图像矫正：测出文字块的倾斜角，转正 ====================
+*文字所在的大致区域
+gen_rectangle1 (TextArea, 100, 150, 215, 530)
+reduce_domain (GrayImage, TextArea, GrayReduced)
+*双峰阈值，取暗的点（喷码的点）
+binary_threshold (GrayReduced, Dots, 'max_separability', 'dark', UsedThreshold)
+*把点连成一整块文字，求这一块的最小外接旋转矩形，Phi 就是倾斜角
+dilation_rectangle1 (Dots, DotsDilated, 25, 11)
+connection (DotsDilated, Blocks)
+select_shape (Blocks, TextBlock, 'area', 'and', 3000, 99999)
+smallest_rectangle2 (TextBlock, BlockRow, BlockColumn, BlockPhi, BlockL1, BlockL2)
+*绕文字块中心反向旋转 Phi，把文字转水平
+hom_mat2d_identity (HomMat2DIdentity)
+hom_mat2d_rotate (HomMat2DIdentity, -BlockPhi, BlockRow, BlockColumn, HomMat2DRotate)
+affine_trans_image (GrayImage, GrayRect, HomMat2DRotate, 'bilinear', 'false')
+dev_display (GrayRect)
+
+*==================== 3. 分行：每一行文字单独处理 ====================
+reduce_domain (GrayRect, TextArea, GrayRectReduced)
+binary_threshold (GrayRectReduced, DotsRect, 'max_separability', 'dark', UsedThreshold2)
+*校正后两行文字之间有一段没有点的空行：横向拉长、竖向只补一个空行，就得到两条“行带”，按从上到下排序
+dilation_rectangle1 (DotsRect, LineBandsRaw, 61, 3)
+connection (LineBandsRaw, LineBands)
+select_shape (LineBands, LineBandsBig, 'area', 'and', 5000, 999999)
+sort_region (LineBandsBig, LineBandsSorted, 'upper_left', 'true', 'row')
+select_obj (LineBandsSorted, Band1, 1)
+select_obj (LineBandsSorted, Band2, 2)
+intersection (DotsRect, Band1, Line1Dots)
+intersection (DotsRect, Band2, Line2Dots)
+
+*==================== 4. 分字：把一个字符的点连成一块 ====================
+*矫正之后两行用同一个膨胀核就能把每个字符的点连成一块（宽 3、高 9）
+dilation_rectangle1 (Line1Dots, Line1Chars, 3, 9)
+connection (Line1Chars, Line1Conn)
+select_shape (Line1Conn, Line1Sel, 'area', 'and', 100, 99999)
+sort_region (Line1Sel, Line1Sorted, 'character', 'true', 'row')
+dilation_rectangle1 (Line2Dots, Line2Chars, 3, 9)
+connection (Line2Chars, Line2Conn)
+select_shape (Line2Conn, Line2Sel, 'area', 'and', 100, 99999)
+sort_region (Line2Sel, Line2Sorted, 'character', 'true', 'row')
+count_obj (Line1Sorted, Number1)
+count_obj (Line2Sorted, Number2)
+
+*==================== 5. 训练 OCR 分类器（点阵字体没有现成字库，按 OCR 助手的流程自己训练）====================
+*把样图里每个字符的内容标出来
+words1 := ['2','0','1','6','0','7','1','3']
+words2 := ['6','6','1','2','A','1','5',':','3','6','B']
+trainFile := 'wangzetong.trf'
+for Index := 1 to Number1 by 1
+    select_obj (Line1Sorted, Char1, Index)
+    append_ocr_trainf (Char1, GrayRect, words1[Index - 1], trainFile)
+endfor
+for Index := 1 to Number2 by 1
+    select_obj (Line2Sorted, Char2, Index)
+    append_ocr_trainf (Char2, GrayRect, words2[Index - 1], trainFile)
+endfor
+read_ocr_trainf_names (trainFile, CharacterNames, CharacterCount)
+create_ocr_class_mlp (8, 10, 'constant', 'default', CharacterNames, 80, 'none', 10, 42, OCRHandle)
+trainf_ocr_class_mlp (OCRHandle, trainFile, 200, 1, 0.01, TrainError, TrainErrorLog)
+write_ocr_class_mlp (OCRHandle, 'wangzetong.omc')
+clear_ocr_class_mlp (OCRHandle)
+
+*==================== 6. 读取分类器并识别 ====================
+read_ocr_class_mlp ('wangzetong.omc', OCRHandle1)
+do_ocr_multi_class_mlp (Line1Sorted, GrayRect, OCRHandle1, Class1, Confidence1)
+do_ocr_multi_class_mlp (Line2Sorted, GrayRect, OCRHandle1, Class2, Confidence2)
+*把识别出的字符拼成字符串；相邻字符间距大于 20 像素的地方补一个空格
+smallest_rectangle1 (Line1Sorted, Row11, Column11, Row21, Column21)
+smallest_rectangle1 (Line2Sorted, Row12, Column12, Row22, Column22)
+str1 := ''
+for Index := 0 to |Class1| - 1 by 1
+    if (Index > 0 and Column11[Index] - Column21[Index - 1] > 20)
+        str1 := str1 + ' '
+    endif
+    str1 := str1 + Class1[Index]
+endfor
+str2 := ''
+for Index := 0 to |Class2| - 1 by 1
+    if (Index > 0 and Column12[Index] - Column22[Index - 1] > 20)
+        str2 := str2 + ' '
+    endif
+    str2 := str2 + Class2[Index]
+endfor
+
+*==================== 7. 显示：识别结果放在日期的正上方 ====================
+dev_display (GrayRect)
+dev_set_color ('green')
+dev_display (Line1Sorted)
+dev_display (Line2Sorted)
+disp_message (WindowHandle, '识别结果:  ' + str1 + '   ' + str2, 'image', Row11[0] - 38, Column11[0], 'green', 'true')
+
+*==================== 8. 附加分：识别结果保存成文本 ====================
+open_file ('wangzetong_result.txt', 'output', FileHandle)
+fwrite_string (FileHandle, '日期: ' + str1)
+fnew_line (FileHandle)
+fwrite_string (FileHandle, '批号/时间: ' + str2)
+fnew_line (FileHandle)
+close_file (FileHandle)

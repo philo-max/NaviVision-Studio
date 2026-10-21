@@ -568,6 +568,22 @@ def edges_subpix(
     return xld_list
 
 
+def halcon_phi(box_points) -> float:
+    """
+    由最小外接旋转矩形的 4 个角点 (x=列, y=行) 求 HALCON 约定的 Phi: 最长边与水平方向的夹角,
+    逆时针 (图像显示上的视觉方向) 为正, 范围 (-pi/2, pi/2]。
+    """
+    pts = np.asarray(box_points, dtype=np.float64)
+    edge_a, edge_b = pts[1] - pts[0], pts[2] - pts[1]
+    longer = edge_a if np.linalg.norm(edge_a) >= np.linalg.norm(edge_b) else edge_b
+    phi = math.atan2(-longer[1], longer[0])
+    if phi > math.pi / 2:
+        phi -= math.pi
+    elif phi <= -math.pi / 2:
+        phi += math.pi
+    return phi
+
+
 def measure_region(region: Region) -> Dict[str, Any]:
     """
     HALCON measure_region / smallest_rectangle2 / smallest_circle 工业几何度量算子:
@@ -599,8 +615,8 @@ def measure_region(region: Region) -> Dict[str, Any]:
         (rcx, rcy), (rw, rh), r_angle = rect
         major_len = max(rw, rh) / 2.0
         minor_len = min(rw, rh) / 2.0
-        phi_rad = math.radians(r_angle)
         box_pts = cv2.boxPoints(rect).tolist()  # 4 个角点坐标 [[x, y], ...]
+        phi_rad = halcon_phi(box_pts)
 
         # 2. 最小外接圆 (HALCON: smallest_circle)
         (mc_x, mc_y), mc_r = cv2.minEnclosingCircle(cnt)
