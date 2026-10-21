@@ -45,6 +45,7 @@ class InteractiveCodeEditor {
     // 滚动同步
     this.editor.addEventListener('scroll', () => {
       this.lineNumbers.scrollTop = this.editor.scrollTop;
+      this.syncHighlightScroll();
     });
 
     // 支持 Tab 缩进 (4 空格) 和 Ctrl+Enter 快捷运行
@@ -97,6 +98,7 @@ class InteractiveCodeEditor {
 
   updateLanguageUI(lang) {
     this.currentLang = lang;
+    this.refreshHighlight();
     const varBar = document.getElementById('hdevVarBar');
     const syncBtn = document.getElementById('btnSyncToPipeline');
     const termTitle = document.getElementById('terminalTitle');
@@ -124,6 +126,21 @@ class InteractiveCodeEditor {
       numbersHtml += `<div class="${cls.join(' ')}" data-line="${i}" title="点击切换断点">${i}</div>`;
     }
     this.lineNumbers.innerHTML = numbersHtml;
+    this.refreshHighlight();
+  }
+
+  refreshHighlight() {
+    const layer = document.getElementById('editorHighlight');
+    if (!layer || !window.SyntaxHighlighter) return;
+    layer.innerHTML = SyntaxHighlighter.highlight(this.editor.value, this.currentLang);
+    this.syncHighlightScroll();
+  }
+
+  syncHighlightScroll() {
+    const layer = document.getElementById('editorHighlight');
+    if (!layer) return;
+    layer.scrollTop = this.editor.scrollTop;
+    layer.scrollLeft = this.editor.scrollLeft;
   }
 
   async runScript() {

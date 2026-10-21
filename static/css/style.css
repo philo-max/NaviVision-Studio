@@ -1017,20 +1017,55 @@ body {
   word-break: break-all;
 }
 
-.script-editor-textarea {
+.editor-stack {
   flex: 1;
-  background: transparent;
+  min-width: 0;
+  position: relative;
+  display: flex;
+}
+
+.script-editor-textarea,
+.script-editor-highlight {
+  margin: 0;
   border: none;
-  outline: none;
   padding: 12px 14px;
-  color: var(--text-main);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
-  resize: none;
   white-space: pre;
   tab-size: 4;
 }
+
+.script-editor-textarea {
+  position: relative;
+  flex: 1;
+  background: transparent;
+  outline: none;
+  color: transparent;
+  caret-color: var(--text-main);
+  resize: none;
+}
+
+.script-editor-textarea::selection {
+  background: rgba(56, 189, 248, 0.35);
+}
+
+.script-editor-highlight {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text-main);
+  background: transparent;
+}
+
+.tok-comment { color: #6fbf73; font-style: italic; }
+.tok-string { color: #f0a070; }
+.tok-number { color: #b5d99c; }
+.tok-keyword { color: #c792ea; font-weight: 600; }
+.tok-constant { color: #c792ea; }
+.tok-operator { color: #8ab4f8; }
+.tok-function { color: #5ccfe6; }
 
 /* Terminal Console Panel */
 .terminal-panel {

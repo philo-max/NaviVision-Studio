@@ -6,7 +6,7 @@
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
   <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
-  <link rel="stylesheet" href="/static/css/style.css?v=20261021_ctrlvars2">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261021_hl">
 </head>
 <body>
 
@@ -198,7 +198,10 @@
       <!-- 代码输入区与行号 -->
       <div class="editor-wrapper">
         <div class="line-numbers-gutter" id="editorLineNumbers">1</div>
-        <textarea class="script-editor-textarea" id="scriptEditor" spellcheck="false"></textarea>
+        <div class="editor-stack">
+          <pre class="script-editor-highlight" id="editorHighlight" aria-hidden="true"></pre>
+          <textarea class="script-editor-textarea" id="scriptEditor" spellcheck="false"></textarea>
+        </div>
       </div>
 
       <!-- HDevelop 变量窗口: Iconic 变量缩略图卡片, 点击即在图形窗口显示 -->
@@ -460,7 +463,8 @@ for obj in result["objects"]:
   <script src="/static/js/viewport.js?v=20261021_redraw"></script>
   <script src="/static/js/histogram.js?v=20260921_run"></script>
   <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
-  <script src="/static/js/code_editor.js?v=20261021_ctrlvars"></script>
+  <script src="/static/js/syntax_highlight.js?v=20261021_hl"></script>
+  <script src="/static/js/code_editor.js?v=20261021_hl"></script>
   <script src="/static/js/operator_manual.js?v=20261021_newops"></script>
   <script src="/static/js/results_panel.js?v=20261002_dock"></script>
   <script src="/static/js/app.js?v=20261014_shape"></script>
