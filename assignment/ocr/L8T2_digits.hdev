@@ -1,5 +1,5 @@
 *读取图片
-read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/L8_digits_369.jpg')
+read_image (Image, 'samples/L8_digits_369.jpg')
 dev_get_window(WindowHandle)
 
 

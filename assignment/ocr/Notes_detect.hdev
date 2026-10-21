@@ -1,6 +1,6 @@
 *==================== 笔记 09：OCR 在线检测 ====================
 dev_close_window ()
-path := 'F:/计算机视觉/NaviVision_Studio/samples/ocr_digits'
+path := 'samples/ocr_digits'
 dev_open_window (0, 0, 900, 140, 'black', WindowHandle)
 *1）读取训练好的分类器
 read_ocr_class_mlp (path+'/Model0-9.omc', OCRHandle)

@@ -1,6 +1,6 @@
 *==================== 考核第 1 步：基础流程（不矫正，用内置字库）====================
 dev_close_window ()
-read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/wangzetong.png')
+read_image (Image, 'samples/wangzetong.png')
 rgb1_to_gray (Image, GrayImage)
 get_image_size (GrayImage, Width, Height)
 dev_open_window (0, 0, Width, Height, 'black', WindowHandle)

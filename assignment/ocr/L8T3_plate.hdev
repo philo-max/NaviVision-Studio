@@ -1,6 +1,6 @@
 *==================== 练习三拓展：汉字 + 字母 + 数字混合训练 ====================
 dev_close_window ()
-read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/L8_plate_jing.jpg')
+read_image (Image, 'samples/L8_plate_jing.jpg')
 get_image_size (Image, Width, Height)
 dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
 rgb1_to_gray (Image, GrayImage)

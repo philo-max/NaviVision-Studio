@@ -15,6 +15,9 @@ def list_files(directory: str, options: Any = "files") -> List[str]:
     options 里的 'files' / 'follow_links' 等选项被接受, 子目录与递归选项不在支持范围内。
     """
     folder = Path(str(directory))
+    if not folder.is_absolute():
+        # 相对路径按程序目录解析 (与 read_image 一致), 这样随程序一起发出去的 samples 在任何电脑上都能找到
+        folder = Path(__file__).resolve().parent.parent / folder
     if not folder.is_dir():
         raise FileNotFoundError(f"目录不存在: {directory}")
     wanted = options if isinstance(options, list) else [options]

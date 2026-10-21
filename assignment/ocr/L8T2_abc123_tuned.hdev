@@ -1,7 +1,7 @@
 *==== 第 2 步：按各连通域的面积调参（字母 A、B 的面积是 249、313，超过了 200；噪点最大 79）====
 dev_close_window()
 dev_open_window (0, 0, 512, 512, 'black', WindowHandle)
-read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/L8_abc123.png')
+read_image (Image, 'samples/L8_abc123.png')
 
 
 

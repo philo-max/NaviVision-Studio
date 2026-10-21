@@ -1,7 +1,7 @@
 *==================== 考核第 2 步：加上图像矫正（仍然用内置字库）====================
 *==================== 1. 读图、灰度化、打开窗口 ====================
 dev_close_window ()
-read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/wangzetong.png')
+read_image (Image, 'samples/wangzetong.png')
 rgb1_to_gray (Image, GrayImage)
 get_image_size (GrayImage, Width, Height)
 dev_open_window (0, 0, Width, Height, 'black', WindowHandle)

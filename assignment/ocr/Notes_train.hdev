@@ -1,6 +1,6 @@
 *==================== 笔记 09：OCR 离线训练 ====================
 dev_close_window ()
-path := 'F:/计算机视觉/NaviVision_Studio/samples/ocr_digits'
+path := 'samples/ocr_digits'
 *1）读取样本图像，分割单个字符区域
 read_image (Image, path+'/Traning.bmp')
 get_image_size (Image, Width, Height)

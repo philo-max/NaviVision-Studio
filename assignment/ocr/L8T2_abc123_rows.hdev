@@ -1,7 +1,7 @@
 *==== 第 3 步：两行各用各的字库（第一行字母 A-Z，第二行数字 0-9）====
 dev_close_window ()
 dev_open_window (0, 0, 512, 512, 'black', WindowHandle)
-read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/L8_abc123.png')
+read_image (Image, 'samples/L8_abc123.png')
 rgb1_to_gray (Image, GrayImage)
 *两行文字各给一个矩形区域
 gen_rectangle1 (LettersArea, 90, 130, 150, 270)
