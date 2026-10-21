@@ -159,6 +159,7 @@ class InteractiveCodeEditor {
           this.logToConsole(`⏱️ 执行耗时: ${data.duration_ms} ms | 渲染目标: ${data.display_target || 'Image'}`, 'meta');
 
           this.renderIconicVarPills(data.iconic_vars || [], data.display_target);
+          this.renderControlVars(data.control_var_list || []);
           this.renderWindowPills(data.windows || []);
 
           if (typeof this.onResult === 'function') {
@@ -169,6 +170,8 @@ class InteractiveCodeEditor {
           if (data.stdout) {
             this.logToConsole(data.stdout, 'error');
           }
+          this.renderIconicVarPills(data.iconic_vars || [], data.display_target);
+          this.renderControlVars(data.control_var_list || []);
         }
       } catch (err) {
         this.logToConsole(`[网络异常] 无法连接 HDevelop 服务端: ${err}`, 'error');
@@ -250,7 +253,6 @@ class InteractiveCodeEditor {
       });
       const data = await resp.json();
       this.debugActive = true;
-      document.getElementById('debugWatchPanel').style.display = 'block';
       this._setDebugButtonsState({ canStart: false, canStep: true, canContinue: true, canStop: true });
       this._handleDebugState(data);
     } catch (err) {
@@ -331,6 +333,7 @@ class InteractiveCodeEditor {
     this.updateLineNumbers();
     this.renderWatchTable(data.control_vars || {});
     this.renderIconicVarPills(data.iconic_vars || [], data.display_target);
+    this.renderControlVars(data.control_var_list || []);
     this.renderWindowPills(data.windows || []);
 
     const reasonText = {
@@ -365,6 +368,35 @@ class InteractiveCodeEditor {
     }
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     body.innerHTML = entries.map(([k, v]) => `<tr><td style="color:var(--neon-cyan);">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+  }
+
+  renderControlVars(vars) {
+    const body = document.getElementById('hdevCtrlBody');
+    if (!body) return;
+    const countEl = document.getElementById('hdevCtrlCount');
+    if (countEl) countEl.textContent = vars && vars.length ? `${vars.length} 个` : '';
+    body.innerHTML = '';
+
+    if (!vars || vars.length === 0) {
+      const row = body.insertRow();
+      const cell = row.insertCell();
+      cell.colSpan = 2;
+      cell.className = 'ctrl-var-empty';
+      cell.textContent = '暂无控制变量';
+      return;
+    }
+
+    vars.forEach(v => {
+      const row = body.insertRow();
+      const nameCell = row.insertCell();
+      nameCell.className = 'ctrl-var-name';
+      nameCell.textContent = v.name;
+      nameCell.title = v.type === 'tuple' ? `${v.name} (tuple, ${v.length} 个元素)` : `${v.name} (${v.type})`;
+      const valueCell = row.insertCell();
+      valueCell.className = 'ctrl-var-value';
+      valueCell.textContent = v.value;
+      valueCell.title = v.value;
+    });
   }
 
   renderIconicVarPills(vars, activeTarget) {

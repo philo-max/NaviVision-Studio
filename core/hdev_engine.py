@@ -32,6 +32,55 @@ GRAPHICS_STYLE_OPERATORS = frozenset({
     "dev_update_off", "dev_update_on", "dev_update_window", "dev_update_pc", "dev_update_var",
     "set_system",
 })
+CONTROL_VALUE_MAX_ITEMS = 100
+CONTROL_VALUE_SIGNIFICANT_DIGITS = 6
+
+
+def _to_plain(value: Any) -> Any:
+    """把 numpy 标量 / 数组转换为 Python 原生类型, 便于格式化与序列化"""
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    return value
+
+
+def format_control_value(value: Any) -> str:
+    """按 HDevelop 变量窗口的风格显示控制变量: 实数保留 6 位有效数字且带小数点, 字符串带单引号, 元组用方括号"""
+    value = _to_plain(value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        text = f"{value:.{CONTROL_VALUE_SIGNIFICANT_DIGITS}g}"
+        return text if any(ch in text for ch in ".eni") else text + ".0"
+    if isinstance(value, str):
+        return f"'{value}'"
+    if isinstance(value, list):
+        items = [format_control_value(v) for v in value[:CONTROL_VALUE_MAX_ITEMS]]
+        if len(value) > CONTROL_VALUE_MAX_ITEMS:
+            items.append(f"… 共 {len(value)} 个")
+        return "[" + ", ".join(items) + "]"
+    return str(value)
+
+
+def _control_type(value: Any) -> str:
+    if isinstance(value, list):
+        return "tuple"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "real"
+    if isinstance(value, str):
+        return "string"
+    return type(value).__name__
+
+
 HDEV_REGION_ALPHA = 255
 THUMBNAIL_MAX_SIDE = 96
 
@@ -726,6 +775,7 @@ class HDevInterpreter:
                 "stdout": "\n".join(self.stdout),
                 "iconic_vars": self._list_iconic_vars(),
                 "control_vars": {k: str(v) for k, v in self.control_vars.items()},
+                "control_var_list": self._list_control_vars(),
                 "display_target": self.display_target,
                 **render_res
             }
@@ -740,7 +790,8 @@ class HDevInterpreter:
                 "duration_ms": duration_ms,
                 "stdout": "\n".join(self.stdout),
                 "iconic_vars": self._list_iconic_vars(),
-                "control_vars": {k: str(v) for k, v in self.control_vars.items()}
+                "control_vars": {k: str(v) for k, v in self.control_vars.items()},
+                "control_var_list": self._list_control_vars()
             }
 
     # ------------------------------------------------------------------
@@ -775,6 +826,7 @@ class HDevInterpreter:
             "stdout": "\n".join(self.stdout),
             "iconic_vars": self._list_iconic_vars(),
             "control_vars": {k: str(v) for k, v in self.control_vars.items()},
+            "control_var_list": self._list_control_vars(),
             "display_target": self.display_target,
             **render_res
         }
@@ -1629,6 +1681,19 @@ class HDevInterpreter:
         key = f"{name}#{len(self._display_snapshots) + 1}"
         self._display_snapshots[key] = obj
         overlay.append(key)
+
+    def _list_control_vars(self) -> List[Dict[str, Any]]:
+        """枚举控制变量 (按出现顺序), 值按 HDevelop 变量窗口的风格格式化; 以下划线开头的内部变量不显示"""
+        out = []
+        for name, value in self.control_vars.items():
+            if name.startswith("_"):
+                continue
+            value = _to_plain(value)
+            entry = {"name": name, "value": format_control_value(value), "type": _control_type(value)}
+            if isinstance(value, list):
+                entry["length"] = len(value)
+            out.append(entry)
+        return out
 
     def _list_iconic_vars(self) -> List[Dict[str, Any]]:
         """枚举当前所有的 Iconic 图像/几何变量信息"""

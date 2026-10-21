@@ -699,6 +699,39 @@ class TestHDevelopEngine(unittest.TestCase):
         res = HDevInterpreter(base_image=self._morph_image()).execute_script(script)
         self.assertTrue(res["success"], res.get("error"))
 
+    def test_control_var_list_formats_values_like_hdevelop(self):
+        script = (
+            "get_image_size (Image, Width, Height)\n"
+            "Ratio := Width / Height\n"
+            "Name := 'abc'\n"
+            "Scores := [0.5, 1, 'x']\n"
+            "_hidden := 1"
+        )
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        listed = {v["name"]: v for v in res["control_var_list"]}
+        self.assertNotIn("_hidden", listed)
+        self.assertEqual(listed["Width"]["value"], "300")
+        self.assertEqual(listed["Width"]["type"], "integer")
+        self.assertEqual(listed["Ratio"]["value"], "1.5")
+        self.assertEqual(listed["Ratio"]["type"], "real")
+        self.assertEqual(listed["Name"]["value"], "'abc'")
+        self.assertEqual(listed["Scores"]["value"], "[0.5, 1, 'x']")
+        self.assertEqual(listed["Scores"]["length"], 3)
+        self.assertEqual(list(listed)[:2], ["Width", "Height"])
+
+    def test_control_var_list_survives_errors_and_trims_long_tuples(self):
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script("Total := 2\nnot_a_real_operator (Image, Out)")
+        self.assertFalse(res["success"])
+        self.assertEqual([v["name"] for v in res["control_var_list"]], ["Total"])
+        from core.hdev_engine import format_control_value
+        long_text = format_control_value(list(range(150)))
+        self.assertTrue(long_text.endswith("… 共 150 个]"))
+        self.assertEqual(format_control_value(3.0), "3.0")
+        self.assertEqual(format_control_value(0.123456789), "0.123457")
+
     def test_iconic_vars_carry_thumbnails_and_sizes(self):
         it = HDevInterpreter(base_image=self._morph_image())
         res = it.execute_script("threshold (Image, Region, 0, 10)")

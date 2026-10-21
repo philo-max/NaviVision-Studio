@@ -796,6 +796,7 @@ body {
 
 .editor-wrapper {
   flex: 1;
+  min-height: 160px;
   position: relative;
   display: flex;
   background: var(--bg-panel);
@@ -836,6 +837,44 @@ body {
 .var-window-empty {
   padding: 18px 0;
   font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.ctrl-var-scroll {
+  max-height: 96px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.ctrl-var-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ctrl-var-table td {
+  padding: 2px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ctrl-var-name {
+  width: 1%;
+  white-space: nowrap;
+  color: var(--neon-cyan, #38bdf8);
+}
+
+.ctrl-var-value {
+  max-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-main);
+}
+
+.ctrl-var-empty {
+  padding: 8px 12px;
   font-style: italic;
   color: var(--text-muted);
 }

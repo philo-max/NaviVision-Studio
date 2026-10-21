@@ -6,7 +6,7 @@
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
   <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
-  <link rel="stylesheet" href="/static/css/style.css?v=20261012_varwin">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261021_ctrlvars2">
 </head>
 <body>
 
@@ -209,6 +209,17 @@
         </div>
         <div class="var-window-cards" id="hdevVarPills">
           <span class="var-window-empty">运行后在此显示图像、区域等变量</span>
+        </div>
+        <div class="var-window-header">
+          <span>🔢 控制变量</span>
+          <span class="var-window-count" id="hdevCtrlCount"></span>
+        </div>
+        <div class="ctrl-var-scroll">
+          <table class="ctrl-var-table">
+            <tbody id="hdevCtrlBody">
+              <tr><td class="ctrl-var-empty" colspan="2">运行后在此显示 Width、Area、Score 等数值变量</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -446,7 +457,7 @@ for obj in result["objects"]:
   <script src="/static/js/viewport.js?v=20261021_redraw"></script>
   <script src="/static/js/histogram.js?v=20260921_run"></script>
   <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
-  <script src="/static/js/code_editor.js?v=20261014_shape"></script>
+  <script src="/static/js/code_editor.js?v=20261021_ctrlvars"></script>
   <script src="/static/js/operator_manual.js?v=20260923_overlay"></script>
   <script src="/static/js/results_panel.js?v=20261002_dock"></script>
   <script src="/static/js/app.js?v=20261014_shape"></script>
