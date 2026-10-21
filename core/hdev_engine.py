@@ -7,6 +7,7 @@ NaviVision Studio (OpenDevelop) - HDevelop DSL Engine
 """
 
 import os
+from functools import lru_cache
 import re
 import xml.etree.ElementTree as ET
 import time
@@ -24,6 +25,8 @@ from core import hdev_expr
 from core import hdev_geometry
 from core.shape_model import ShapeModel, create_shape_model as build_shape_model
 from core.shape_search import find_shape_models
+from core import ocr_mlp, text_region_ops, workspace
+from core.ocr_mlp import TrainedOcrClassifier
 from core.pipeline import encode_image_base64, create_colored_label_mask
 
 GRAPHICS_STYLE_OPERATORS = frozenset({
@@ -111,6 +114,46 @@ MESSAGE_LIGHT_BOX_BGR = (235, 235, 235)
 MESSAGE_LUMA_THRESHOLD = 128
 
 
+_CJK_FONT_FILES = ("msyh.ttc", "msyhl.ttc", "simhei.ttf", "simsun.ttc", "NotoSansCJK-Regular.ttc", "wqy-microhei.ttc")
+_CJK_FONT_DIRS = (r"C:\Windows\Fonts", "/usr/share/fonts/truetype/wqy", "/usr/share/fonts/opentype/noto", "/Library/Fonts", "/System/Library/Fonts")
+
+
+@lru_cache(maxsize=8)
+def _cjk_font(size: int):
+    """找一个能显示汉字的系统字体 (Pillow); 找不到时返回 None"""
+    from PIL import ImageFont
+    for directory in _CJK_FONT_DIRS:
+        for name in _CJK_FONT_FILES:
+            path = os.path.join(directory, name)
+            if os.path.exists(path):
+                try:
+                    return ImageFont.truetype(path, size)
+                except OSError:
+                    continue
+    return None
+
+
+def _draw_message_unicode(canvas: np.ndarray, msg: Dict[str, Any], lines: List[str], color: Tuple[int, int, int], scale: float) -> np.ndarray:
+    """含汉字等非 ASCII 字符的文字: 用 Pillow 绘制 (OpenCV 自带字体画不出汉字)"""
+    from PIL import Image, ImageDraw
+    font = _cjk_font(max(8, int(round(MESSAGE_BASE_FONT_PX * scale))))
+    if font is None:
+        return canvas
+    image = Image.fromarray(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(image)
+    boxes = [draw.textbbox((0, 0), ln, font=font) for ln in lines]
+    line_h = int(max(b[3] - b[1] for b in boxes) * MESSAGE_LINE_SPACING) + 2
+    x0, y0, pad = int(msg["col"]), int(msg["row"]), MESSAGE_BOX_PADDING
+    if msg["box"]:
+        luma = 0.114 * color[0] + 0.587 * color[1] + 0.299 * color[2]
+        box_color = MESSAGE_LIGHT_BOX_BGR if luma < MESSAGE_LUMA_THRESHOLD else MESSAGE_DARK_BOX_BGR
+        box_w = max(b[2] - b[0] for b in boxes) + 2 * pad
+        draw.rectangle((x0, y0, x0 + box_w, y0 + line_h * len(lines) + pad), fill=box_color[::-1])
+    for i, ln in enumerate(lines):
+        draw.text((x0 + pad, y0 + line_h * i + pad // 2), ln, font=font, fill=color[::-1])
+    return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
+
+
 def _draw_messages(img: np.ndarray, messages: List[Dict[str, Any]]) -> np.ndarray:
     """将 disp_message 记录的文字叠加绘制到图像副本上 (行/列为图像像素坐标, 文字左上角对齐)"""
     if not messages:
@@ -122,6 +165,9 @@ def _draw_messages(img: np.ndarray, messages: List[Dict[str, Any]]) -> np.ndarra
     for msg in messages:
         lines = str(msg["text"]).split("\n")
         color = MESSAGE_COLORS_BGR.get(str(msg["color"]).lower(), MESSAGE_COLORS_BGR["black"])
+        if any(ord(ch) > 127 for ln in lines for ch in ln):
+            canvas = _draw_message_unicode(canvas, msg, lines, color, scale)
+            continue
         sizes = [cv2.getTextSize(ln, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0] for ln in lines]
         line_h = int(max(s[1] for s in sizes) * MESSAGE_LINE_SPACING) + 2
         x0, y0 = int(msg["col"]), int(msg["row"])
@@ -176,6 +222,24 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "dev_set_colored": ([], [], ["NumColors"], []),
     "set_display_font": ([], [], ["WindowHandle", "Size", "Font", "Bold", "Slant"], []),
     "get_image_size": (["Image"], [], [], ["Width", "Height"]),
+    "smallest_rectangle1": (["Regions"], [], [], ["Row1", "Column1", "Row2", "Column2"]),
+    "sort_region": (["Regions"], ["SortedRegions"], ["SortMode", "Order", "RowOrCol"], []),
+    "char_threshold": (["Image", "HistoRegion"], ["Characters"], ["Sigma", "Percent"], ["Threshold"]),
+    "draw_rectangle1": ([], [], ["WindowHandle"], ["Row1", "Column1", "Row2", "Column2"]),
+    "dev_get_window": ([], [], [], ["WindowHandle"]),
+    "stop": ([], [], [], []),
+    "affine_trans_image": (["Image"], ["ImageAffinTrans"], ["HomMat2D", "Interpolation", "AdaptImageSize"], []),
+    "rotate_image": (["Image"], ["ImageRotate"], ["Phi", "Interpolation"], []),
+    "append_ocr_trainf": (["Character", "Image"], [], ["Class", "TrainingFile"], []),
+    "read_ocr_trainf_names": ([], [], ["TrainingFile"], ["CharacterNames", "CharacterCount"]),
+    "create_ocr_class_mlp": ([], [], ["WidthCharacter", "HeightCharacter", "Interpolation", "Features", "Characters", "NumHidden", "Preprocessing", "NumComponents", "RandSeed"], ["OCRHandle"]),
+    "trainf_ocr_class_mlp": ([], [], ["OCRHandle", "TrainingFile", "MaxIterations", "WeightTolerance", "ErrorTolerance"], ["Error", "ErrorLog"]),
+    "write_ocr_class_mlp": ([], [], ["OCRHandle", "FileName"], []),
+    "clear_ocr_class_mlp": ([], [], ["OCRHandle"], []),
+    "open_file": ([], [], ["FileName", "Mode"], ["FileHandle"]),
+    "fwrite_string": ([], [], ["FileHandle", "String"], []),
+    "fnew_line": ([], [], ["FileHandle"], []),
+    "close_file": ([], [], ["FileHandle"], []),
     "mean_image": (["Image"], ["ImageMean"], ["MaskWidth", "MaskHeight"], []),
     "gauss_filter": (["Image"], ["ImageGauss"], ["Size"], []),
     "median_image": (["Image"], ["ImageMedian"], ["MaskType", "Radius", "Margin"], []),
@@ -299,9 +363,20 @@ class HDevParser:
                 # 若 XML 解析失败则降级为纯文本行解析
                 pass
 
-        # 普通文本解析
-        for idx, l in enumerate(script_content.splitlines(), start=1):
-            lines.append((idx, l.strip()))
+        # 普通文本解析 (行尾的 \ 表示续行: 与下一行合并为同一条语句, 行号取首行)
+        pending: Optional[Tuple[int, str]] = None
+        for idx, raw in enumerate(script_content.splitlines(), start=1):
+            text = raw.strip()
+            if pending is not None:
+                text = f"{pending[1]} {text}"
+                idx = pending[0]
+                pending = None
+            if text.endswith("\\") and not text.startswith(("*", "//")):
+                pending = (idx, text[:-1].rstrip())
+                continue
+            lines.append((idx, text))
+        if pending is not None:
+            lines.append(pending)
         return lines
 
     @classmethod
@@ -623,7 +698,9 @@ class HDevInterpreter:
         # 脚本中是否显式调用过 dev_display/disp_obj/dev_open_window (决定渲染走叠加模式还是单目标覆盖模式)
         self.explicit_display_used: bool = False
         # OCR 分类器句柄表: 句柄 -> 字符集名称 (由 read_ocr_class_mlp 创建)
-        self.ocr_handles: Dict[int, str] = {}
+        self.ocr_handles: Dict[int, Any] = {}
+        # 脚本打开的文件句柄表 (open_file 创建, close_file / 脚本结束时关闭)
+        self.open_files: Dict[int, Any] = {}
         # dev_display 时刻的 Region / XLD 快照: 叠加层键 -> 对象
         self._display_snapshots: Dict[str, Any] = {}
         # 形状模板句柄表: 句柄 -> ShapeModel (由 create_shape_model / create_scaled_shape_model 创建)
@@ -667,8 +744,12 @@ class HDevInterpreter:
         # 常量或简单四则运算
         try:
             return self._eval_strict(s)
-        except Exception:
+        except (NameError, SyntaxError, hdev_expr.UnsupportedExpression):
             return s
+        except IndexError:
+            raise ValueError(f"表达式 '{s}' 的元组下标越界")
+        except ZeroDivisionError:
+            raise ValueError(f"表达式 '{s}' 除数为零")
 
     def _eval_strict(self, expr: str) -> Any:
         """仅允许安全数学运算; 求值失败直接抛出异常 (供条件判断使用)"""
@@ -730,6 +811,9 @@ class HDevInterpreter:
             return flow.if_end[pc] + 1
         if t == "endif":
             return pc + 1
+        if t == "operator" and inst.op_name.lower() == "stop":
+            self.log(f"  [{inst.line_num}] stop: 程序在此停止 (其后的语句不再执行)")
+            return len(self.instructions)
         self._run_single_instruction(inst)
         return pc + 1
 
@@ -793,6 +877,14 @@ class HDevInterpreter:
                 "control_vars": {k: str(v) for k, v in self.control_vars.items()},
                 "control_var_list": self._list_control_vars()
             }
+        finally:
+            self._close_open_files()
+
+    def _close_open_files(self) -> None:
+        """脚本结束 (成功或出错) 时关闭 open_file 打开却没有 close_file 的文件, 保证内容落盘"""
+        for stream in self.open_files.values():
+            stream.close()
+        self.open_files.clear()
 
     # ------------------------------------------------------------------
     # 单步调试 / 断点续跑 / 变量监视器: 与 execute_script 共用 _run_single_instruction,
@@ -936,8 +1028,25 @@ class HDevInterpreter:
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] threshold: 分割范围 [{min_gray}, {max_gray}], 生成区域 '{out_name}'")
 
+        # 4a. binary_threshold (Image, Region, Method, LightDark, UsedThreshold): 在定义域内由直方图自动定阈值
+        elif op == "binary_threshold":
+            in_name = i_in[0] if i_in else "Image"
+            src = self.iconic_vars.get(in_name)
+            if not isinstance(src, np.ndarray):
+                raise ValueError(f"未找到输入图像 '{in_name}'")
+            if len(c_in) < 2:
+                raise ValueError("binary_threshold 需要 Method 与 LightDark 两个参数")
+            gray = ops.rgb1_to_gray(src) if src.ndim == 3 else src
+            reg, used = text_region_ops.binary_threshold(gray, self.domains.get(in_name), c_in[0], c_in[1])
+            out_name = i_out[0] if i_out else "Region"
+            self.iconic_vars[out_name] = reg
+            self.display_target = out_name
+            if c_out:
+                self.control_vars[c_out[0]] = used
+            self.log(f"  [{inst.line_num}] binary_threshold: {c_in[0]} / {c_in[1]}, 阈值 {used}, 区域 {int(np.count_nonzero(reg.mask))} px -> '{out_name}'")
+
         # 4. auto_threshold (Image, Regions, Sigma)
-        elif op in ("auto_threshold", "binary_threshold"):
+        elif op == "auto_threshold":
             in_name = i_in[0] if i_in else "Image"
             out_name = i_out[0] if i_out else "Regions"
             src = self.iconic_vars.get(in_name)
@@ -1215,6 +1324,165 @@ class HDevInterpreter:
                 "box": True,
             })
 
+        # 7o. 文字区域算子: smallest_rectangle1, sort_region, char_threshold
+        elif op in ("smallest_rectangle1", "sort_region"):
+            in_name = i_in[0] if i_in else "Regions"
+            src_reg = self.iconic_vars.get(in_name)
+            if not isinstance(src_reg, Region):
+                raise ValueError(f"输入对象 '{in_name}' 不是有效的 Region")
+            if op == "smallest_rectangle1":
+                for var, values in zip(c_out, text_region_ops.smallest_rectangle1(src_reg)):
+                    self.control_vars[var] = values
+                self.log(f"  [{inst.line_num}] smallest_rectangle1: 输出 {len(self.control_vars.get(c_out[0], [])) if c_out else 0} 个外接矩形")
+            else:
+                if len(c_in) < 3:
+                    raise ValueError("sort_region 需要 3 个参数: SortMode, Order, RowOrCol")
+                out_name = i_out[0] if i_out else "SortedRegions"
+                self.iconic_vars[out_name] = text_region_ops.sort_region(src_reg, c_in[0], c_in[1], c_in[2])
+                self.display_target = out_name
+                self.log(f"  [{inst.line_num}] sort_region: 按 '{c_in[0]}' / row-or-column '{c_in[2]}' 排序 -> '{out_name}'")
+
+        elif op == "char_threshold":
+            img_name = i_in[0] if i_in else "Image"
+            src = self.iconic_vars.get(img_name)
+            if not isinstance(src, np.ndarray):
+                raise ValueError(f"未找到输入图像 '{img_name}'")
+            gray = ops.rgb1_to_gray(src) if src.ndim == 3 else src
+            histo = self.iconic_vars.get(i_in[1]) if len(i_in) > 1 else None
+            domain = histo.mask > 0 if isinstance(histo, Region) else self.domains.get(img_name)
+            sigma = float(c_in[0]) if c_in else text_region_ops.DEFAULT_SIGMA
+            region, threshold = text_region_ops.char_threshold(gray, domain, sigma)
+            out_name = i_out[0] if i_out else "Characters"
+            self.iconic_vars[out_name] = region
+            self.display_target = out_name
+            if c_out:
+                self.control_vars[c_out[0]] = threshold
+            self.log(f"  [{inst.line_num}] char_threshold: 阈值 {threshold}, 字符区域 {int(np.count_nonzero(region.mask))} px -> '{out_name}'")
+
+        # 7p. 交互与窗口: draw_rectangle1 读取预先画好的矩形 ROI, dev_get_window 返回当前窗口句柄
+        elif op == "draw_rectangle1":
+            geom = self.roi_geometry
+            if not geom or geom.get("type") != "rect":
+                raise ValueError('draw_rectangle1 需要先用图形窗口工具栏的"矩形"画出矩形 ROI, 然后再运行脚本')
+            x, y, w, h = (int(geom[k]) for k in ("x", "y", "w", "h"))
+            for name, value in zip(c_out, (y, x, y + h - 1, x + w - 1)):
+                self.control_vars[name] = value
+            self.log(f"  [{inst.line_num}] draw_rectangle1: 使用已画好的矩形 ROI ({y},{x})-({y + h - 1},{x + w - 1})")
+
+        elif op == "dev_get_window":
+            self.control_vars[c_out[0] if c_out else "WindowHandle"] = self.active_window
+
+        # 7q. 图像矫正: affine_trans_image / rotate_image
+        elif op in ("affine_trans_image", "rotate_image"):
+            in_name = i_in[0] if i_in else "Image"
+            src = self.iconic_vars.get(in_name)
+            if not isinstance(src, np.ndarray):
+                raise ValueError(f"未找到输入图像 '{in_name}'")
+            if op == "affine_trans_image":
+                if len(c_in) < 1:
+                    raise ValueError("affine_trans_image 需要 HomMat2D 参数")
+                adapt = str(c_in[2]).lower() == "true" if len(c_in) > 2 else False
+                result = hdev_geometry.affine_trans_image(src, c_in[0], str(c_in[1]) if len(c_in) > 1 else "bilinear", adapt)
+            else:
+                if len(c_in) < 1:
+                    raise ValueError("rotate_image 需要 Phi 参数 (角度)")
+                result = hdev_geometry.rotate_image(src, float(c_in[0]), str(c_in[1]) if len(c_in) > 1 else "bilinear")
+            out_name = i_out[0] if i_out else "ImageResult"
+            self.iconic_vars[out_name] = result
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] {op}: 输出 {result.shape[1]}x{result.shape[0]} 图像 -> '{out_name}'")
+
+        # 7r. OCR 训练: append_ocr_trainf / read_ocr_trainf_names / create_ocr_class_mlp /
+        #     trainf_ocr_class_mlp / write_ocr_class_mlp / clear_ocr_class_mlp
+        elif op == "append_ocr_trainf":
+            char_name = i_in[0] if i_in else "Character"
+            reg = self.iconic_vars.get(char_name)
+            if not isinstance(reg, Region):
+                raise ValueError(f"输入对象 '{char_name}' 不是有效的 Region")
+            if len(c_in) < 2:
+                raise ValueError("append_ocr_trainf 需要 Class 与 TrainingFile 两个参数")
+            classes = c_in[0] if isinstance(c_in[0], list) else [c_in[0]]
+            connected = reg if reg.is_connected else ops.connection(reg)
+            features = []
+            for obj in connected.objects:
+                feat = ocr_mlp.glyph_feature(obj.bbox_mask(connected.mask))
+                if feat is None:
+                    raise ValueError("字符区域太小, 无法作为训练样本")
+                features.append(feat)
+            path = workspace.workspace_path(c_in[1])
+            ocr_mlp.append_samples(path, features, [str(c) for c in classes])
+            self.log(f"  [{inst.line_num}] append_ocr_trainf: 追加 {len(features)} 个样本 ({''.join(str(c) for c in classes)}) -> {path.name}")
+
+        elif op == "read_ocr_trainf_names":
+            names, counts = ocr_mlp.read_names(workspace.workspace_path(c_in[0] if c_in else ""))
+            if len(c_out) > 0:
+                self.control_vars[c_out[0]] = names
+            if len(c_out) > 1:
+                self.control_vars[c_out[1]] = counts
+            self.log(f"  [{inst.line_num}] read_ocr_trainf_names: {len(names)} 个字符 {names}")
+
+        elif op == "create_ocr_class_mlp":
+            if len(c_in) < 9:
+                raise ValueError("create_ocr_class_mlp 需要 9 个参数: WidthCharacter ... RandSeed")
+            characters = c_in[4] if isinstance(c_in[4], list) else [c_in[4]]
+            classifier = TrainedOcrClassifier(characters, int(c_in[5]), int(c_in[8]))
+            handle = max(self.ocr_handles, default=-1) + 1
+            self.ocr_handles[handle] = classifier
+            self.control_vars[c_out[0] if c_out else "OCRHandle"] = handle
+            self.log(f"  [{inst.line_num}] create_ocr_class_mlp: 创建 MLP 分类器 #{handle} ({len(classifier.characters)} 类, 隐藏单元 {classifier.num_hidden}); "
+                     "字符宽高 / 插值 / 特征 / 预处理参数在本平台由内部固定的字形归一化代替")
+
+        elif op in ("trainf_ocr_class_mlp", "write_ocr_class_mlp", "clear_ocr_class_mlp"):
+            handle = int(c_in[0]) if c_in else -1
+            classifier = self.ocr_handles.get(handle)
+            if op == "clear_ocr_class_mlp":
+                self.ocr_handles.pop(handle, None)
+            elif not isinstance(classifier, TrainedOcrClassifier):
+                raise ValueError("OCR 句柄无效: 需要先用 create_ocr_class_mlp 创建 (或 read_ocr_class_mlp 读取) 可训练的分类器")
+            elif op == "trainf_ocr_class_mlp":
+                if len(c_in) < 5:
+                    raise ValueError("trainf_ocr_class_mlp 需要 5 个输入参数")
+                features, labels = ocr_mlp.load_samples(workspace.workspace_path(c_in[1]))
+                error, error_log = classifier.train(features, labels, int(c_in[2]), float(c_in[4]))
+                if len(c_out) > 0:
+                    self.control_vars[c_out[0]] = error
+                if len(c_out) > 1:
+                    self.control_vars[c_out[1]] = error_log
+                self.log(f"  [{inst.line_num}] trainf_ocr_class_mlp: 用 {len(labels)} 个样本训练, 平均平方误差 {error:.5f} (记录 {len(error_log)} 次)")
+            else:
+                path = workspace.workspace_path(c_in[1] if len(c_in) > 1 else "")
+                classifier.save(path)
+                self.log(f"  [{inst.line_num}] write_ocr_class_mlp: 已保存分类器 -> {path.name}")
+
+        # 7s. 文件读写 (限定在工作区): open_file / fwrite_string / fnew_line / close_file
+        elif op == "open_file":
+            if len(c_in) < 2:
+                raise ValueError("open_file 需要 FileName 与 Mode 两个参数")
+            modes = {"output": "w", "append": "a"}
+            mode = str(c_in[1]).lower()
+            if mode not in modes:
+                raise ValueError("open_file 的 Mode 只支持 'output' 与 'append'")
+            path = workspace.workspace_path(c_in[0])
+            handle = max(self.open_files, default=-1) + 1
+            self.open_files[handle] = open(path, modes[mode], encoding="utf-8")
+            self.control_vars[c_out[0] if c_out else "FileHandle"] = handle
+            self.log(f"  [{inst.line_num}] open_file: 打开 {path} ({mode})")
+
+        elif op in ("fwrite_string", "fnew_line", "close_file"):
+            handle = int(c_in[0]) if c_in else -1
+            stream = self.open_files.get(handle)
+            if stream is None:
+                raise ValueError("文件句柄无效: 请先调用 open_file")
+            if op == "fwrite_string":
+                value = c_in[1] if len(c_in) > 1 else ""
+                stream.write("".join(str(v) for v in value) if isinstance(value, list) else str(value))
+            elif op == "fnew_line":
+                stream.write("\n")
+            else:
+                stream.close()
+                del self.open_files[handle]
+                self.log(f"  [{inst.line_num}] close_file: 已关闭文件句柄 {handle}")
+
         # 7h. 纯显示样式设置: 区域本平台已按对象自动分色, 字体不影响计算结果
         elif op in ("dev_set_colored", "set_display_font"):
             self.log(f"  [{inst.line_num}] {op}: 仅影响显示样式, 本平台已自动处理, 无需执行")
@@ -1332,7 +1600,7 @@ class HDevInterpreter:
             obj = src_reg.objects[index - 1]
             r0, c0, r1, c1 = obj.bbox
             mask = np.zeros_like(src_reg.mask)
-            mask[r0:r1, c0:c1] = src_reg.mask[r0:r1, c0:c1]
+            mask[r0:r1, c0:c1] = obj.bbox_mask(src_reg.mask)
             self.iconic_vars[out_name] = Region(mask=mask, objects=[obj], is_connected=True)
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] select_obj: 取第 {index} 个目标 -> '{out_name}'")
@@ -1607,12 +1875,20 @@ class HDevInterpreter:
         elif op == "read_ocr_class_mlp":
             handle_var = c_out[0] if c_out else "OCRHandle"
             library = str(c_in[0]) if c_in else ""
-            charset_name = ocr_chars.charset_name_for_library(library)
-            ocr_chars.get_classifier(charset_name)
-            handle = len(self.ocr_handles)
-            self.ocr_handles[handle] = charset_name
+            saved_path = workspace.workspace_path(library) if library else None
+            handle = max(self.ocr_handles, default=-1) + 1
+            if saved_path is not None and saved_path.exists():
+                self.ocr_handles[handle] = TrainedOcrClassifier.load(saved_path)
+                message = f"已读取训练好的分类器 {saved_path.name}"
+            elif ocr_chars.is_builtin_library(library):
+                charset_name = ocr_chars.charset_name_for_library(library)
+                ocr_chars.get_classifier(charset_name)
+                self.ocr_handles[handle] = charset_name
+                message = f"已载入内置字符分类器 ({charset_name}), 请求的字符库 '{library}' 以此替代"
+            else:
+                raise FileNotFoundError(f"找不到分类器文件 '{library}': 工作区里没有这个文件, 也不是内置字符库名 (请先训练并 write_ocr_class_mlp)")
             self.control_vars[handle_var] = handle
-            self.log(f"  [{inst.line_num}] read_ocr_class_mlp: 已载入内置字符分类器 ({charset_name}), 请求的字符库 '{library}' 以此替代 -> {handle_var}")
+            self.log(f"  [{inst.line_num}] read_ocr_class_mlp: {message} -> {handle_var}")
 
         elif op == "do_ocr_multi_class_mlp":
             char_name = i_in[0] if i_in else "Character"

@@ -15,6 +15,10 @@ from typing import Any, Callable, Dict, List
 
 _MAX_STRING_LENGTH = 100000
 
+
+class UnsupportedExpression(ValueError):
+    """文本不是本求值器支持的表达式 (调用方可据此把它当作普通字符串)"""
+
 _BINARY: Dict[type, Callable[[Any, Any], Any]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -140,7 +144,7 @@ def _convert_pipes(expr: str) -> str:
         else:
             out.append(ch)
     if open_pipe:
-        raise ValueError("表达式中的 | 没有成对出现")
+        raise UnsupportedExpression("表达式中的 | 没有成对出现")
     return "".join(out)
 
 
@@ -154,7 +158,7 @@ class _Evaluator:
         if isinstance(node, ast.Constant):
             if isinstance(node.value, (int, float, str, bool)):
                 return node.value
-            raise ValueError(f"不支持的常量: {node.value!r}")
+            raise UnsupportedExpression(f"不支持的常量: {node.value!r}")
         if isinstance(node, ast.Name):
             if node.id in self.names:
                 return self.names[node.id]
@@ -175,11 +179,11 @@ class _Evaluator:
                 return operand
             if isinstance(node.op, ast.Not):
                 return not operand
-            raise ValueError("不支持的一元运算")
+            raise UnsupportedExpression("不支持的一元运算")
         if isinstance(node, ast.BinOp):
             op_type = type(node.op)
             if op_type not in _BINARY:
-                raise ValueError("不支持的二元运算")
+                raise UnsupportedExpression("不支持的二元运算")
             return _broadcast(op_type, self.visit(node.left), self.visit(node.right))
         if isinstance(node, ast.BoolOp):
             values = [self.visit(v) for v in node.values]
@@ -189,7 +193,7 @@ class _Evaluator:
             for op, comparator in zip(node.ops, node.comparators):
                 right = self.visit(comparator)
                 if type(op) not in _COMPARE:
-                    raise ValueError("不支持的比较运算")
+                    raise UnsupportedExpression("不支持的比较运算")
                 if not _COMPARE[type(op)](left, right):
                     return False
                 left = right
@@ -198,15 +202,15 @@ class _Evaluator:
             target = self.visit(node.value)
             index = self.visit(node.slice)
             if not isinstance(target, list):
-                raise ValueError("只有元组支持下标访问")
+                raise UnsupportedExpression("只有元组支持下标访问")
             if isinstance(index, list):
                 return [target[int(i)] for i in index]
             return target[int(index)]
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name) or node.func.id not in FUNCTIONS or node.keywords:
-                raise ValueError("不支持的函数调用")
+                raise UnsupportedExpression("不支持的函数调用")
             return FUNCTIONS[node.func.id](*[self.visit(arg) for arg in node.args])
-        raise ValueError(f"不支持的表达式: {type(node).__name__}")
+        raise UnsupportedExpression(f"不支持的表达式: {type(node).__name__}")
 
 
 def evaluate(expr: str, names: Dict[str, Any]) -> Any:

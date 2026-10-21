@@ -23,6 +23,14 @@ class RegionObject:
     contours: List[List[Tuple[float, float]]] = field(default_factory=list)
     rectangularity: float = 0.0  # 矩形度: area / (bbox_w * bbox_h)
     hu_moments: List[float] = field(default_factory=list)  # 7 个 Hu 不变矩 (log-scaled)
+    pixels: Optional[np.ndarray] = None  # 外接框大小的 0/255 掩膜, 仅含该目标自己的像素 (外接框相交时避免带入邻居)
+
+    def bbox_mask(self, region_mask: np.ndarray) -> np.ndarray:
+        """返回该目标在外接框内的像素掩膜; 没有保存自身像素时退回按外接框裁剪总掩膜"""
+        if self.pixels is not None:
+            return self.pixels
+        r0, c0, r1, c1 = self.bbox
+        return region_mask[r0:r1, c0:c1]
 
 
 @dataclass
@@ -34,6 +42,7 @@ class Region:
     mask: np.ndarray  # uint8: 0 or 255
     objects: List[RegionObject] = field(default_factory=list)
     is_connected: bool = False  # 是否已执行 connection 打散
+    ordered: bool = False  # 目标顺序是否由 sort_region 显式指定 (OCR 识别时据此决定是否沿用该顺序)
 
     @property
     def count(self) -> int:

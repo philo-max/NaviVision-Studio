@@ -156,6 +156,7 @@ def connection(region: Region, connectivity: int = 8) -> Region:
             contours=[contour_points] if contour_points else [],
             rectangularity=rectangularity,
             hu_moments=hu_moments,
+            pixels=(labels[y:y + h, x:x + w] == i).astype(np.uint8) * 255,
         )
         objects.append(obj)
         
@@ -206,10 +207,10 @@ def select_shape(
         filtered_objects.append(obj)
         # 将符合条件的物体绘制到新 mask
         y, x, y2, x2 = obj.bbox
-        sub_mask = reg.mask[y:y2, x:x2]
+        sub_mask = obj.bbox_mask(reg.mask)
         filtered_mask[y:y2, x:x2] = np.bitwise_or(filtered_mask[y:y2, x:x2], sub_mask)
         
-    return Region(mask=filtered_mask, objects=filtered_objects, is_connected=True)
+    return Region(mask=filtered_mask, objects=filtered_objects, is_connected=True, ordered=reg.ordered)
 
 
 def morphology(
@@ -580,7 +581,7 @@ def measure_region(region: Region) -> Dict[str, Any]:
 
     for obj in reg.objects:
         y1, x1, y2, x2 = obj.bbox
-        sub_mask = reg.mask[y1:y2, x1:x2]
+        sub_mask = obj.bbox_mask(reg.mask)
         cnts, _ = cv2.findContours(sub_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not cnts:
             continue

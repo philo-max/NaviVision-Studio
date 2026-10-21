@@ -390,6 +390,9 @@ async def run_custom_script(request: Request, req: ScriptRunRequest):
 
 
 # --- HDevelop DSL 交互与转译接口 ---
+HDEV_RUN_TIMEOUT_S = 30.0  # 脚本里可能包含 OCR 训练等较耗时的步骤
+
+
 class HDevRunRequest(BaseModel):
     code: str
     display_target: Optional[str] = None
@@ -413,7 +416,7 @@ async def run_hdev_script(request: Request, req: HDevRunRequest):
     interpreter.roi_geometry = req.roi
     if req.display_target:
         interpreter.display_target = req.display_target
-    res = interpreter.execute_script(req.code, timeout_sec=3.0)
+    res = interpreter.execute_script(req.code, timeout_sec=HDEV_RUN_TIMEOUT_S)
     return JSONResponse(content=res)
 
 

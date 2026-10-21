@@ -129,6 +129,15 @@ class CharClassifier:
         return self.charset[winner], round(confidence, 3)
 
 
+BUILTIN_LIBRARY_PREFIXES = ("INDUSTRIAL", "DOTPRINT", "DOCUMENT", "UNIVERSAL", "OCRA", "OCRB", "SEMI", "PHARMA", "REGULAR")
+
+
+def is_builtin_library(library_file: str) -> bool:
+    """是否为 HALCON 自带字符库的文件名 (如 Industrial_0-9+_NoRej.omc); 其余名称需要是工作区里训练保存的分类器"""
+    name = str(library_file).replace("\\", "/").rsplit("/", 1)[-1].upper()
+    return name.startswith(BUILTIN_LIBRARY_PREFIXES)
+
+
 def charset_name_for_library(library_file: str) -> str:
     """由 HALCON 字库文件名推断字符集: 仅含 0-9 -> 数字; 其余 (A-Z / 混合 / 未知) -> 数字+字母"""
     name = str(library_file).upper()
@@ -172,14 +181,18 @@ def _resolve_confusables(classes: List[str]) -> List[str]:
     return classes
 
 
-def recognize_regions(region: Region, charset_name: str = DEFAULT_CHARSET_NAME) -> List[dict]:
+def recognize_regions(region: Region, classifier_ref=DEFAULT_CHARSET_NAME) -> List[dict]:
     """对 Region 中每个连通域单独分类, 按阅读顺序返回逐字符明细 (字符 / 置信度 / 质心 / 外接框 / 面积)"""
-    classifier = get_classifier(charset_name)
+    # classifier_ref: 内置字符集名称, 或带 classify(二值字形) 方法的分类器对象;
+    # 区域经 sort_region 显式排序过时沿用该顺序 (与 HALCON 一致), 否则按阅读顺序
+    charset_name = classifier_ref if isinstance(classifier_ref, str) else None
+    classifier = get_classifier(charset_name) if charset_name else classifier_ref
     connected = region if region.is_connected else connection(region)
     results = []
-    for obj in _reading_order(connected.objects):
+    objects = connected.objects if connected.ordered else _reading_order(connected.objects)
+    for obj in objects:
         r0, c0, r1, c1 = obj.bbox
-        ch, conf = classifier.classify(connected.mask[r0:r1, c0:c1])
+        ch, conf = classifier.classify(obj.bbox_mask(connected.mask))
         results.append({
             "char": ch,
             "confidence": conf,

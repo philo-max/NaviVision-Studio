@@ -10,6 +10,9 @@ HALCON 2D 齐次矩阵 (hom_mat2d_*) 与轮廓仿射变换。
 import math
 from typing import List, Sequence, Tuple
 
+import cv2
+import numpy as np
+
 from core.types import XLDContour
 
 HomMat2D = Tuple[float, float, float, float, float, float]
@@ -73,3 +76,45 @@ def affine_trans_contours(contours: List[XLDContour], mat: Sequence[float]) -> L
         length = sum(math.dist(points[i], points[i + 1]) for i in range(len(points) - 1))
         out.append(XLDContour(id=contour.id, points=points, is_closed=contour.is_closed, length=length))
     return out
+
+
+_INTERPOLATIONS = {
+    "nearest_neighbor": cv2.INTER_NEAREST,
+    "constant": cv2.INTER_LINEAR,
+    "bilinear": cv2.INTER_LINEAR,
+    "weighted": cv2.INTER_LINEAR,
+    "bicubic": cv2.INTER_CUBIC,
+}
+
+
+def _interpolation_flag(name: str) -> int:
+    key = str(name).lower()
+    if key not in _INTERPOLATIONS:
+        raise ValueError(f"不支持的插值方式 '{name}', 可选: {', '.join(_INTERPOLATIONS)}")
+    return _INTERPOLATIONS[key]
+
+
+def affine_trans_image(img: np.ndarray, mat: Sequence[float], interpolation: str = "bilinear",
+                       adapt_image_size: bool = False) -> np.ndarray:
+    """
+    HALCON affine_trans_image: 把图像按 HomMat2D (作用在 (行, 列) 上) 仿射变换, 区域外填 0。
+    adapt_image_size 为 True 时输出画布扩大到刚好容纳变换后的整幅图像。
+    """
+    a, b, c, d, e, f = _as_matrix(mat)
+    cv_mat = np.array([[e, d, f], [b, a, c]], dtype=np.float64)
+    height, width = img.shape[:2]
+    out_size = (width, height)
+    if adapt_image_size:
+        corners = np.array([[0, 0, 1], [width, 0, 1], [width, height, 1], [0, height, 1]], dtype=np.float64) @ cv_mat.T
+        min_x, min_y = corners.min(axis=0)
+        cv_mat[0, 2] -= min_x
+        cv_mat[1, 2] -= min_y
+        out_size = (int(math.ceil(corners[:, 0].max() - min_x)), int(math.ceil(corners[:, 1].max() - min_y)))
+    return cv2.warpAffine(img, cv_mat, out_size, flags=_interpolation_flag(interpolation))
+
+
+def rotate_image(img: np.ndarray, phi_degrees: float, interpolation: str = "bilinear") -> np.ndarray:
+    """HALCON rotate_image: 绕图像中心 (像素中心坐标系下的几何中心) 旋转 phi (角度, 逆时针为正), 画布大小不变"""
+    height, width = img.shape[:2]
+    mat = cv2.getRotationMatrix2D(((width - 1) / 2.0, (height - 1) / 2.0), float(phi_degrees), 1.0)
+    return cv2.warpAffine(img, mat, (width, height), flags=_interpolation_flag(interpolation))

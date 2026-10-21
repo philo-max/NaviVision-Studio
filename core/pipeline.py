@@ -68,7 +68,7 @@ def create_colored_label_mask(
         color = palette[i % len(palette)]
         # 提取当前对象的内部点
         y, x, y2, x2 = obj.bbox
-        sub_mask = region.mask[y:y2, x:x2]
+        sub_mask = obj.bbox_mask(region.mask)
         yy, xx = np.where(sub_mask > 0)
         color_mask[y + yy, x + xx] = [color[0], color[1], color[2], 160 if alpha is None else alpha]
         
