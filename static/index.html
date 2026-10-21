@@ -6,7 +6,7 @@
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
   <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
-  <link rel="stylesheet" href="/static/css/style.css?v=20261002_dock">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261012_varwin">
 </head>
 <body>
 
@@ -178,14 +178,6 @@
         </div>
       </div>
 
-      <!-- HDevelop Iconic 变量视口目标监视 -->
-      <div id="hdevVarBar" style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-panel-elevated);border-bottom:1px solid var(--border-subtle);font-size:11px;">
-        <span style="color:var(--text-muted);white-space:nowrap;font-weight:600;">👁️ 视口目标:</span>
-        <div id="hdevVarPills" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-          <span style="color:var(--text-muted);font-style:italic;">运行后选择变量...</span>
-        </div>
-      </div>
-
       <!-- HDevelop 多图形窗口切换 (仅当脚本打开了多个窗口时显示) -->
       <div id="hdevWindowBar" style="display:none;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-panel-elevated);border-bottom:1px solid var(--border-subtle);font-size:11px;">
         <span style="color:var(--text-muted);white-space:nowrap;font-weight:600;">🪟 图形窗口:</span>
@@ -207,6 +199,17 @@
       <div class="editor-wrapper">
         <div class="line-numbers-gutter" id="editorLineNumbers">1</div>
         <textarea class="script-editor-textarea" id="scriptEditor" spellcheck="false"></textarea>
+      </div>
+
+      <!-- HDevelop 变量窗口: Iconic 变量缩略图卡片, 点击即在图形窗口显示 -->
+      <div class="var-window" id="hdevVarBar">
+        <div class="var-window-header">
+          <span>🖼️ 图像变量</span>
+          <span class="var-window-count" id="hdevVarCount"></span>
+        </div>
+        <div class="var-window-cards" id="hdevVarPills">
+          <span class="var-window-empty">运行后在此显示图像、区域等变量</span>
+        </div>
       </div>
 
       <!-- 黑客沙箱终端输出 -->
@@ -440,12 +443,12 @@ for obj in result["objects"]:
   </div>
 
   <!-- JavaScript Modules -->
-  <script src="/static/js/viewport.js?v=20260921_run"></script>
+  <script src="/static/js/viewport.js?v=20261021_redraw"></script>
   <script src="/static/js/histogram.js?v=20260921_run"></script>
   <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
-  <script src="/static/js/code_editor.js?v=20260923_rmtpl"></script>
+  <script src="/static/js/code_editor.js?v=20261014_shape"></script>
   <script src="/static/js/operator_manual.js?v=20260923_overlay"></script>
   <script src="/static/js/results_panel.js?v=20261002_dock"></script>
-  <script src="/static/js/app.js?v=20261002_dock"></script>
+  <script src="/static/js/app.js?v=20261014_shape"></script>
 </body>
 </html>

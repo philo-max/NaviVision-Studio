@@ -1,0 +1,53 @@
+*关闭窗口
+dev_close_window()
+*读入模板图片
+read_image (Image, 'F:/计算机视觉/NaviVision_Studio/samples/ceshi1.jpg')
+
+*获取图像尺寸
+get_image_size(Image, Width, Height)
+*打开窗口
+dev_open_window(0, 0, Width, Height, 'black', WindowHandle)
+*窗口设置
+dev_set_color('green')
+dev_set_draw('margin')
+*显示图像
+dev_display(Image)
+
+*获取所要制作模板的区域
+dev_disp_text('绘制模板区域,鼠标左键拖动进行绘制,单击右键完成绘制','window','top','left','black',[],[])
+draw_circle(WindowHandle, Rowl, Columnl, Radius)
+gen_circle(Circle, Rowl, Columnl, Radius)
+*获取感兴趣区域图像
+reduce_domain(Image, Circle, ImageReduced)
+*创建模板
+create_scaled_shape_model(ImageReduced, 5, rad(-45), rad(90), 'auto', 0.8, 1.0, 'auto', 'none','ignore_global_polarity', 40, 10, ModelID)
+
+*获取创建的模板的参数,一般用于需要对模型参数进行调整的时候。
+get_shape_model_params(ModelID, NumLevels, AngleStart, AngleExtent, AngleStep, ScaleMin, ScaleMax, ScaleStep, Metric, MinContrast)
+*获取模板的轮廓，并进行仿射变换,将其与图像对齐，制作的模板的中心坐标为原点(0,0)
+get_shape_model_contours(Model, ModelID, 1)
+vector_angle_to_rigid(0, 0, 0, Rowl, Columnl, 0, HomMat2D)
+affine_trans_contour_xld(Model,ModelTrans,HomMat2D)
+dev_display(Image)
+dev_display(ModelTrans)
+*读入待识别图像
+read_image (ImageSearch, 'F:/计算机视觉/NaviVision_Studio/samples/ceshi1.jpg')
+
+dev_display(ImageSearch)
+*进行模板匹配
+find_scaled_shape_model(ImageSearch, ModelID,rad( - 45), rad(90), 0.8, 1.0, 0.5, 0, 0.5, 'least_squares', 5, 0.8, Row, Column, Angle, Scale, Score)
+*在窗口上显示识别到的模型数量
+dev_disp_text('识别到的对象数量:'+|Score|,'window','top','left','black',[],[])
+*根据找到的图像的坐标、角度及缩放比例对每个对象进行仿射变换,使得模板与识别到的对象进行
+*对齐
+for I:= 0 to |Score| - 1 by 1
+    hom_mat2d_identity(HomMat2DIdentity)
+    hom_mat2d_translate(HomMat2DIdentity, Row[I], Column[I], HomMat2DTranslate)
+    hom_mat2d_rotate(HomMat2DTranslate, Angle[I], Row[I], Column[I], HomMat2DRotate)
+    hom_mat2d_scale(HomMat2DRotate, Scale[I],Scale[I], Row[I], Column[I], HomMat2DScale)
+    affine_trans_contour_xld(Model, ModelTrans, HomMat2DScale)
+    dev_display(ModelTrans)
+endfor
+
+*显示每个识别到的对象的信息
+disp_message(WindowHandle,'得分:'+ Score+'\n'+'例:'+Scale,'image',Row,Column-80,'black', 'true')

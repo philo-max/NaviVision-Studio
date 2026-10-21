@@ -147,7 +147,8 @@ class InteractiveCodeEditor {
           },
           body: JSON.stringify({
             code: code,
-            display_target: this.currentDisplayTarget
+            display_target: this.currentDisplayTarget,
+            roi: this.getRoi ? this.getRoi() : null
           })
         });
         const data = await resp.json();
@@ -245,7 +246,7 @@ class InteractiveCodeEditor {
       const resp = await fetch('/api/hdev/debug/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Session-ID': this._debugSessionId() },
-        body: JSON.stringify({ code })
+        body: JSON.stringify({ code, roi: this.getRoi ? this.getRoi() : null })
       });
       const data = await resp.json();
       this.debugActive = true;
@@ -370,39 +371,53 @@ class InteractiveCodeEditor {
     const pillsContainer = document.getElementById('hdevVarPills');
     if (!pillsContainer) return;
     pillsContainer.innerHTML = '';
+    const countEl = document.getElementById('hdevVarCount');
+    if (countEl) countEl.textContent = vars && vars.length ? `${vars.length} 个` : '';
 
     if (!vars || vars.length === 0) {
-      pillsContainer.innerHTML = '<span style="color:var(--text-muted);font-style:italic;">无输出变量</span>';
+      pillsContainer.innerHTML = '<span class="var-window-empty">无输出变量</span>';
       return;
     }
 
     vars.forEach(v => {
-      const pill = document.createElement('button');
-      pill.className = `btn btn-secondary ${v.name === activeTarget ? 'active' : ''}`;
-      pill.style.padding = '2px 8px';
-      pill.style.fontSize = '11px';
-      pill.style.borderRadius = '12px';
-      pill.style.cursor = 'pointer';
+      const card = document.createElement('button');
+      card.className = `var-card ${v.name === activeTarget ? 'active' : ''}`;
+      card.title = `${v.name} (${v.type})`;
+
+      const thumb = document.createElement('div');
+      thumb.className = 'var-card-thumb';
+      if (v.thumbnail) {
+        const img = document.createElement('img');
+        img.src = v.thumbnail;
+        img.alt = v.name;
+        thumb.appendChild(img);
+      } else {
+        thumb.textContent = v.type;
+      }
 
       let meta = v.type;
-      if (v.type === 'Region' && v.object_count !== undefined) {
-        meta = `${v.object_count} objs`;
+      if (v.type === 'Image' && v.shape) {
+        meta = `${v.shape[1]}×${v.shape[0]}`;
+      } else if (v.type === 'Region') {
+        meta = `${v.area} px`;
       } else if (v.type === 'XLD' && v.contour_count !== undefined) {
         meta = `${v.contour_count} XLD`;
       }
 
-      pill.innerHTML = `<strong>${v.name}</strong> <span style="opacity:0.75;font-size:10px;">(${meta})</span>`;
-      if (v.name === activeTarget) {
-        pill.style.borderColor = 'var(--neon-cyan)';
-        pill.style.color = 'var(--neon-cyan)';
-      }
+      const name = document.createElement('div');
+      name.className = 'var-card-name';
+      name.textContent = v.name;
+      const info = document.createElement('div');
+      info.className = 'var-card-meta';
+      info.textContent = meta;
 
-      pill.addEventListener('click', () => {
+      card.append(thumb, name, info);
+      card.addEventListener('click', () => {
         this.currentDisplayTarget = v.name;
         this.runScript();
       });
 
-      pillsContainer.appendChild(pill);
+      pillsContainer.appendChild(card);
     });
   }
 

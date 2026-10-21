@@ -355,6 +355,70 @@ def morphology_struct_element(
     return _finish_morphology(region, new_mask)
 
 
+def _require_same_shape(*regions: Region) -> None:
+    shapes = {r.mask.shape for r in regions}
+    if len(shapes) > 1:
+        raise ValueError(f"区域的画布尺寸不一致: {sorted(shapes)}")
+
+
+def fill_up(region: Region) -> Region:
+    """HALCON fill_up: 填充区域内部的所有孔洞"""
+    contours, _ = cv2.findContours(region.mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    filled = np.zeros_like(region.mask)
+    cv2.drawContours(filled, contours, -1, 255, thickness=-1)
+    return Region(mask=filled, is_connected=False)
+
+
+def region_difference(region: Region, sub: Region) -> Region:
+    """HALCON difference: Region 减去 Sub"""
+    _require_same_shape(region, sub)
+    return Region(mask=cv2.bitwise_and(region.mask, cv2.bitwise_not(sub.mask)), is_connected=False)
+
+
+def region_union(*regions: Region) -> Region:
+    """HALCON union1 / union2: 把若干区域并为一个区域"""
+    _require_same_shape(*regions)
+    merged = regions[0].mask.copy()
+    for reg in regions[1:]:
+        merged = cv2.bitwise_or(merged, reg.mask)
+    return Region(mask=merged, is_connected=False)
+
+
+def region_intersection(region1: Region, region2: Region) -> Region:
+    """HALCON intersection"""
+    _require_same_shape(region1, region2)
+    return Region(mask=cv2.bitwise_and(region1.mask, region2.mask), is_connected=False)
+
+
+def region_complement(region: Region) -> Region:
+    """HALCON complement: 在图像范围内取补集"""
+    return Region(mask=cv2.bitwise_not(region.mask), is_connected=False)
+
+
+def gen_circle_region(shape: Tuple[int, int], row: float, col: float, radius: float) -> Region:
+    """HALCON gen_circle: 以 (row, col) 为圆心的实心圆, 超出图像的部分被裁掉"""
+    if radius < 1:
+        raise ValueError("gen_circle 的 Radius 必须 >= 1")
+    mask = np.zeros((int(shape[0]), int(shape[1])), dtype=np.uint8)
+    cv2.circle(mask, (int(round(col)), int(round(row))), int(round(radius)), 255, -1)
+    return Region(mask=mask, is_connected=False)
+
+
+def region_boundary(region: Region, boundary_type: str = "inner") -> Region:
+    """HALCON boundary: inner 取区域内侧一圈像素, outer 取区域外侧一圈像素 (4 邻域)"""
+    cross = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    kind = str(boundary_type).lower()
+    if kind == "inner":
+        eroded = cv2.erode(region.mask, cross, borderType=cv2.BORDER_CONSTANT, borderValue=0)
+        border = cv2.bitwise_and(region.mask, cv2.bitwise_not(eroded))
+    elif kind == "outer":
+        dilated = cv2.dilate(region.mask, cross)
+        border = cv2.bitwise_and(dilated, cv2.bitwise_not(region.mask))
+    else:
+        raise ValueError(f"boundary 的 BoundaryType 只支持 'inner' / 'outer', 收到 '{boundary_type}'")
+    return Region(mask=border, is_connected=False)
+
+
 def filter_image(
     img: np.ndarray,
     filter_type: str = "gaussian",

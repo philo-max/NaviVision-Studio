@@ -20,7 +20,20 @@ import numpy as np
 from core.types import Region, RegionObject, XLDContour
 from core import operators as ops
 from core import ocr_chars
+from core import hdev_expr
+from core import hdev_geometry
+from core.shape_model import ShapeModel, create_shape_model as build_shape_model
+from core.shape_search import find_shape_models
 from core.pipeline import encode_image_base64, create_colored_label_mask
+
+GRAPHICS_STYLE_OPERATORS = frozenset({
+    "dev_set_color", "dev_set_line_width", "dev_set_draw", "dev_set_part", "dev_set_lut", "dev_set_paint",
+    "dev_set_shape", "dev_set_check", "dev_set_window_extents", "dev_error_var",
+    "dev_update_off", "dev_update_on", "dev_update_window", "dev_update_pc", "dev_update_var",
+    "set_system",
+})
+HDEV_REGION_ALPHA = 255
+THUMBNAIL_MAX_SIDE = 96
 
 
 @dataclass
@@ -103,6 +116,16 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "opening": (["Region", "StructElement"], ["RegionOpening"], [], []),
     "closing": (["Region", "StructElement"], ["RegionClosing"], [], []),
     "gen_ellipse": ([], ["Ellipse"], ["Row", "Column", "Phi", "Radius1", "Radius2"], []),
+    "gen_circle": ([], ["Circle"], ["Row", "Column", "Radius"], []),
+    "fill_up": (["Region"], ["RegionFillUp"], [], []),
+    "difference": (["Region", "Sub"], ["RegionDifference"], [], []),
+    "union1": (["Region"], ["RegionUnion"], [], []),
+    "union2": (["Region1", "Region2"], ["RegionUnion"], [], []),
+    "intersection": (["Region1", "Region2"], ["RegionIntersection"], [], []),
+    "complement": (["Region"], ["RegionComplement"], [], []),
+    "boundary": (["Region"], ["RegionBorder"], ["BoundaryType"], []),
+    "dev_set_colored": ([], [], ["NumColors"], []),
+    "set_display_font": ([], [], ["WindowHandle", "Size", "Font", "Bold", "Slant"], []),
     "get_image_size": (["Image"], [], [], ["Width", "Height"]),
     "mean_image": (["Image"], ["ImageMean"], ["MaskWidth", "MaskHeight"], []),
     "gauss_filter": (["Image"], ["ImageGauss"], ["Size"], []),
@@ -120,7 +143,21 @@ HDEV_SIGNATURES: Dict[str, Tuple[List[str], List[str], List[str], List[str]]] = 
     "gen_rectangle1": ([], ["Rectangle"], ["Row1", "Column1", "Row2", "Column2"], []),
     "rgb_to_hsv": (["Image"], ["HSVImage"], [], []),
     "hsv_threshold": (["Image"], ["Region"], ["HMin", "HMax", "SMin", "SMax", "VMin", "VMax"], []),
-    "find_shape_model": (["Image"], [], ["TemplateID", "AngleStart", "AngleExtent", "MinScore", "NumMatches"], ["Row", "Column", "Angle", "Score"]),
+    "create_shape_model": (["Template"], [], ["NumLevels", "AngleStart", "AngleExtent", "AngleStep", "Optimization", "Metric", "Contrast", "MinContrast"], ["ModelID"]),
+    "create_scaled_shape_model": (["Template"], [], ["NumLevels", "AngleStart", "AngleExtent", "AngleStep", "ScaleMin", "ScaleMax", "ScaleStep", "Optimization", "Metric", "Contrast", "MinContrast"], ["ModelID"]),
+    "find_shape_model": (["Image"], [], ["ModelID", "AngleStart", "AngleExtent", "MinScore", "NumMatches", "MaxOverlap", "SubPixel", "NumLevels", "Greediness"], ["Row", "Column", "Angle", "Score"]),
+    "find_scaled_shape_model": (["Image"], [], ["ModelID", "AngleStart", "AngleExtent", "ScaleMin", "ScaleMax", "MinScore", "NumMatches", "MaxOverlap", "SubPixel", "NumLevels", "Greediness"], ["Row", "Column", "Angle", "Scale", "Score"]),
+    "get_shape_model_params": ([], [], ["ModelID"], ["NumLevels", "AngleStart", "AngleExtent", "AngleStep", "ScaleMin", "ScaleMax", "ScaleStep", "Metric", "MinContrast"]),
+    "get_shape_model_contours": ([], ["ModelContours"], ["ModelID", "Level"], []),
+    "clear_shape_model": ([], [], ["ModelID"], []),
+    "hom_mat2d_identity": ([], [], [], ["HomMat2DIdentity"]),
+    "hom_mat2d_translate": ([], [], ["HomMat2D", "Tx", "Ty"], ["HomMat2DTranslate"]),
+    "hom_mat2d_rotate": ([], [], ["HomMat2D", "Phi", "Px", "Py"], ["HomMat2DRotate"]),
+    "hom_mat2d_scale": ([], [], ["HomMat2D", "Sx", "Sy", "Px", "Py"], ["HomMat2DScale"]),
+    "vector_angle_to_rigid": ([], [], ["Row1", "Column1", "Angle1", "Row2", "Column2", "Angle2"], ["HomMat2D"]),
+    "affine_trans_contour_xld": (["Contours"], ["ContoursAffineTrans"], ["HomMat2D"], []),
+    "draw_circle": ([], [], ["WindowHandle"], ["Row", "Column", "Radius"]),
+    "dev_disp_text": ([], [], ["String", "CoordSystem", "Row", "Column", "Color", "GenParamName", "GenParamValue"], []),
     "gen_contour_polygon_xld": (["Contour"], ["Polygons"], ["Type", "MaxDistance"], []),
     "read_barcode": (["Image"], [], [], ["DecodedStrings"]),
     "read_text": (["Image"], [], ["Lang"], ["RecognizedText"]),
@@ -538,6 +575,12 @@ class HDevInterpreter:
         self.explicit_display_used: bool = False
         # OCR 分类器句柄表: 句柄 -> 字符集名称 (由 read_ocr_class_mlp 创建)
         self.ocr_handles: Dict[int, str] = {}
+        # dev_display 时刻的 Region / XLD 快照: 叠加层键 -> 对象
+        self._display_snapshots: Dict[str, Any] = {}
+        # 形状模板句柄表: 句柄 -> ShapeModel (由 create_shape_model / create_scaled_shape_model 创建)
+        self.shape_models: Dict[int, ShapeModel] = {}
+        # 图形窗口里用户预先画好的 ROI 几何 (供 draw_circle 读取), 形如 {"type": "circle", "cx", "cy", "r"}
+        self.roi_geometry: Optional[Dict[str, Any]] = None
         # 图像定义域 (reduce_domain 产出): 图像变量名 -> 布尔掩膜; threshold 等算子只在域内取像素
         self.domains: Dict[str, np.ndarray] = {}
         # 最近一次 do_ocr_multi_class_mlp 的逐字符识别结果 (供前端结果面板展示)
@@ -581,8 +624,7 @@ class HDevInterpreter:
     def _eval_strict(self, expr: str) -> Any:
         """仅允许安全数学运算; 求值失败直接抛出异常 (供条件判断使用)"""
         allowed_names = {k: v for k, v in self.control_vars.items() if isinstance(v, (int, float, list, str))}
-        allowed_names.update({"max": max, "min": min, "abs": abs, "round": round, "true": True, "false": False})
-        return eval(expr, {"__builtins__": None}, allowed_names)
+        return hdev_expr.evaluate(expr, allowed_names)
 
     def _eval_condition(self, cond: str) -> bool:
         """求值 if/while 条件: HALCON 的 '=' 视为相等比较, '#' 视为不等"""
@@ -963,6 +1005,168 @@ class HDevInterpreter:
             self.display_target = out_name
             self.log(f"  [{inst.line_num}] gen_ellipse: 椭圆中心 ({row:g},{col:g}), 半径 {radius1:g}/{radius2:g} -> '{out_name}'")
 
+        # 7f. 区域集合运算与形状算子: fill_up, difference, union1/2, intersection, complement, boundary
+        elif op in ("fill_up", "difference", "union1", "union2", "intersection", "complement", "boundary"):
+            regions = []
+            for name in i_in:
+                reg = self.iconic_vars.get(name)
+                if not isinstance(reg, Region):
+                    raise ValueError(f"输入对象 '{name}' 不是有效的 Region")
+                regions.append(reg)
+            out_name = i_out[0] if i_out else "RegionResult"
+            if op == "fill_up":
+                result = ops.fill_up(regions[0])
+            elif op == "difference":
+                result = ops.region_difference(regions[0], regions[1])
+            elif op in ("union1", "union2"):
+                result = ops.region_union(*regions)
+            elif op == "intersection":
+                result = ops.region_intersection(regions[0], regions[1])
+            elif op == "complement":
+                result = ops.region_complement(regions[0])
+            else:
+                result = ops.region_boundary(regions[0], str(c_in[0]) if c_in else "inner")
+            self.iconic_vars[out_name] = result
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] {op}: 生成 '{out_name}' (面积 {int(np.count_nonzero(result.mask))} px)")
+
+        # 7g. gen_circle (Circle, Row, Column, Radius)
+        elif op == "gen_circle":
+            out_name = i_out[0] if i_out else "Circle"
+            if len(c_in) < 3:
+                raise ValueError("gen_circle 需要 3 个参数: Row, Column, Radius")
+            row, col, radius = (float(v) for v in c_in[:3])
+            base = next((v for v in reversed(list(self.iconic_vars.values())) if isinstance(v, np.ndarray)), None)
+            if base is None:
+                raise ValueError("gen_circle 之前需要先 read_image 载入图像以确定画布尺寸")
+            self.iconic_vars[out_name] = ops.gen_circle_region(base.shape[:2], row, col, radius)
+            self.display_target = out_name
+            self.log(f"  [{inst.line_num}] gen_circle: 圆心 ({row:g},{col:g}), 半径 {radius:g} -> '{out_name}'")
+
+        # 7i. 形状模板创建: create_shape_model / create_scaled_shape_model
+        elif op in ("create_shape_model", "create_scaled_shape_model"):
+            tmpl_name = i_in[0] if i_in else "Template"
+            template = self.iconic_vars.get(tmpl_name)
+            if not isinstance(template, np.ndarray):
+                raise ValueError(f"未找到模板图像 '{tmpl_name}'")
+            scaled = op == "create_scaled_shape_model"
+            expected = 11 if scaled else 8
+            if len(c_in) < expected:
+                raise ValueError(f"{op} 需要 {expected} 个输入参数, 实际只有 {len(c_in)} 个")
+            if scaled:
+                num_levels, angle_start, angle_extent, angle_step, scale_min, scale_max, scale_step, _, metric, contrast, min_contrast = c_in[:11]
+            else:
+                num_levels, angle_start, angle_extent, angle_step, _, metric, contrast, min_contrast = c_in[:8]
+                scale_min = scale_max = 1.0
+                scale_step = "auto"
+            model = build_shape_model(
+                template, self.domains.get(tmpl_name), num_levels, float(angle_start), float(angle_extent),
+                angle_step, float(scale_min), float(scale_max), scale_step, metric, contrast, min_contrast
+            )
+            handle = max(self.shape_models, default=-1) + 1
+            self.shape_models[handle] = model
+            self.control_vars[c_out[0] if c_out else "ModelID"] = handle
+            self.log(f"  [{inst.line_num}] {op}: 模板 '{tmpl_name}' 创建形状模型 #{handle} "
+                     f"(模板 {model.template.shape[1]}x{model.template.shape[0]} px, {len(model.contours)} 条轮廓)")
+
+        # 7j. 形状模板搜索: find_shape_model / find_scaled_shape_model
+        elif op in ("find_shape_model", "find_scaled_shape_model"):
+            img_name = i_in[0] if i_in else "Image"
+            search_img = self.iconic_vars.get(img_name)
+            if not isinstance(search_img, np.ndarray):
+                raise ValueError(f"未找到搜索图像 '{img_name}'")
+            scaled = op == "find_scaled_shape_model"
+            expected = 11 if scaled else 9
+            if len(c_in) < expected:
+                raise ValueError(f"{op} 需要 {expected} 个输入参数, 实际只有 {len(c_in)} 个")
+            model = self.shape_models.get(int(c_in[0]))
+            if model is None:
+                raise ValueError("形状模型句柄无效: 请先调用 create_shape_model")
+            if scaled:
+                angle_start, angle_extent, scale_min, scale_max, min_score, num_matches, max_overlap, subpixel, num_levels = c_in[1:10]
+            else:
+                angle_start, angle_extent, min_score, num_matches, max_overlap, subpixel, num_levels = c_in[1:8]
+                scale_min = scale_max = 1.0
+            hits = find_shape_models(
+                search_img, model, float(angle_start), float(angle_extent), float(scale_min), float(scale_max),
+                float(min_score), int(num_matches), float(max_overlap), subpixel, num_levels
+            )
+            columns = [[h["row"] for h in hits], [h["column"] for h in hits], [h["angle"] for h in hits]]
+            if scaled:
+                columns.append([h["scale"] for h in hits])
+            columns.append([h["score"] for h in hits])
+            for name, values in zip(c_out, columns):
+                self.control_vars[name] = values
+            best = f", 最高得分 {hits[0]['score']:.3f}" if hits else ""
+            self.log(f"  [{inst.line_num}] {op}: 在 '{img_name}' 中找到 {len(hits)} 个目标{best}")
+
+        # 7k. 形状模型信息: get_shape_model_params / get_shape_model_contours / clear_shape_model
+        elif op in ("get_shape_model_params", "get_shape_model_contours", "clear_shape_model"):
+            model = self.shape_models.get(int(c_in[0])) if c_in else None
+            if model is None:
+                raise ValueError("形状模型句柄无效: 请先调用 create_shape_model")
+            if op == "get_shape_model_params":
+                values = [model.num_levels, model.angle_start, model.angle_extent, model.angle_step,
+                          model.scale_min, model.scale_max, model.scale_step, model.metric, model.min_contrast]
+                for name, value in zip(c_out, values):
+                    self.control_vars[name] = value
+            elif op == "get_shape_model_contours":
+                out_name = i_out[0] if i_out else "ModelContours"
+                self.iconic_vars[out_name] = list(model.contours)
+                self.log(f"  [{inst.line_num}] {op}: 取得 {len(model.contours)} 条模型轮廓 -> '{out_name}' (以模型原点为 (0, 0))")
+            else:
+                del self.shape_models[int(c_in[0])]
+
+        # 7l. 2D 齐次矩阵与轮廓仿射变换
+        elif op in ("hom_mat2d_identity", "hom_mat2d_translate", "hom_mat2d_rotate", "hom_mat2d_scale", "vector_angle_to_rigid"):
+            if op == "hom_mat2d_identity":
+                mat = hdev_geometry.identity()
+            elif op == "hom_mat2d_translate":
+                mat = hdev_geometry.translate(c_in[0], float(c_in[1]), float(c_in[2]))
+            elif op == "hom_mat2d_rotate":
+                mat = hdev_geometry.rotate(c_in[0], float(c_in[1]), float(c_in[2]), float(c_in[3]))
+            elif op == "hom_mat2d_scale":
+                mat = hdev_geometry.scale(c_in[0], float(c_in[1]), float(c_in[2]), float(c_in[3]), float(c_in[4]))
+            else:
+                mat = hdev_geometry.vector_angle_to_rigid(*(float(v) for v in c_in[:6]))
+            self.control_vars[c_out[0] if c_out else "HomMat2D"] = list(mat)
+
+        elif op == "affine_trans_contour_xld":
+            in_name = i_in[0] if i_in else "Contours"
+            out_name = i_out[0] if i_out else "ContoursAffineTrans"
+            contours = self.iconic_vars.get(in_name)
+            if not (isinstance(contours, list) and all(isinstance(c, XLDContour) for c in contours)):
+                raise ValueError(f"输入对象 '{in_name}' 不是有效的 XLD 轮廓")
+            if not c_in:
+                raise ValueError("affine_trans_contour_xld 需要 HomMat2D 参数")
+            self.iconic_vars[out_name] = hdev_geometry.affine_trans_contours(contours, c_in[0])
+            self.display_target = out_name
+
+        # 7m. draw_circle: 读取用户在图形窗口里预先画好的圆形 ROI (脚本一次性运行, 不能中途等待鼠标)
+        elif op == "draw_circle":
+            geom = self.roi_geometry
+            if not geom or geom.get("type") != "circle":
+                raise ValueError('draw_circle 需要先用图形窗口工具栏的"圆"画出圆形 ROI, 然后再运行脚本')
+            for name, value in zip(c_out, (float(geom["cy"]), float(geom["cx"]), float(geom["r"]))):
+                self.control_vars[name] = value
+            self.log(f"  [{inst.line_num}] draw_circle: 使用已画好的圆形 ROI, 圆心 ({geom['cy']},{geom['cx']}), 半径 {geom['r']}")
+
+        # 7n. dev_disp_text: 在当前窗口显示文字 (行列可为像素数值, 'top'/'left' 等关键字按左上角 12 像素处理)
+        elif op == "dev_disp_text":
+            text = c_in[0] if c_in else ""
+            win = self._cur_win()
+            win.messages.append({
+                "text": "\n".join(map(str, text)) if isinstance(text, list) else str(text),
+                "row": c_in[2] if len(c_in) > 2 and isinstance(c_in[2], (int, float)) else 12,
+                "col": c_in[3] if len(c_in) > 3 and isinstance(c_in[3], (int, float)) else 12,
+                "color": c_in[4] if len(c_in) > 4 and isinstance(c_in[4], str) else "black",
+                "box": True,
+            })
+
+        # 7h. 纯显示样式设置: 区域本平台已按对象自动分色, 字体不影响计算结果
+        elif op in ("dev_set_colored", "set_display_font"):
+            self.log(f"  [{inst.line_num}] {op}: 仅影响显示样式, 本平台已自动处理, 无需执行")
+
         # 7e. get_image_size (Image, Width, Height)
         elif op == "get_image_size":
             in_name = i_in[0] if i_in else "Image"
@@ -1106,12 +1310,10 @@ class HDevInterpreter:
                     win.messages = []
                     self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 显示图像 '{in_name}' (画布重绘, 叠加层已清空)")
                 elif isinstance(obj, Region):
-                    if in_name not in win.region_names:
-                        win.region_names.append(in_name)
+                    self._pin_display_object(win.region_names, in_name, obj)
                     self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 叠加显示 Region '{in_name}' (当前叠加层: {win.region_names})")
                 elif isinstance(obj, list) and obj and isinstance(obj[0], XLDContour):
-                    if in_name not in win.xld_names:
-                        win.xld_names.append(in_name)
+                    self._pin_display_object(win.xld_names, in_name, obj)
                     self.log(f"  [{inst.line_num}] {op}: 窗口 #{win.handle} 叠加显示 XLD 轮廓 '{in_name}' (当前叠加层: {win.xld_names})")
 
         # 12b. dev_clear_window: 清空当前活跃图形窗口的所有叠加层
@@ -1223,7 +1425,7 @@ class HDevInterpreter:
             self.log(f"  [{inst.line_num}] {op}: 透视矫正完成 -> '{out_name}', 分辨率={rectified.shape}")
 
         # 18. HALCON 图形窗口与渲染属性控制 (静默无损映射)
-        elif op.startswith("dev_") or op.startswith("set_"):
+        elif op in GRAPHICS_STYLE_OPERATORS:
             # 记录属性配置
             if op == "dev_set_color" and c_in:
                 self.control_vars["_draw_color"] = str(c_in[0])
@@ -1339,6 +1541,11 @@ class HDevInterpreter:
                 raise ValueError(f"未找到输入图像 '{img_name}'")
             if not isinstance(roi, Region):
                 raise ValueError(f"输入对象 '{reg_name}' 不是有效的 Region")
+            if roi.mask.shape[:2] != src.shape[:2]:
+                fitted = np.zeros(src.shape[:2], dtype=np.uint8)
+                rows, cols = min(fitted.shape[0], roi.mask.shape[0]), min(fitted.shape[1], roi.mask.shape[1])
+                fitted[:rows, :cols] = roi.mask[:rows, :cols]
+                roi = Region(mask=fitted, is_connected=False)
             self.iconic_vars[out_name] = ops.reduce_domain(src, roi)
             self.domains[out_name] = roi.mask > 0
             self.display_target = out_name
@@ -1386,17 +1593,42 @@ class HDevInterpreter:
                 text = str(text_val)
             handle = int(c_in[0]) if len(c_in) > 0 and str(c_in[0]).lstrip("-").isdigit() else self.active_window
             win = self.windows.get(handle, self._cur_win())
-            win.messages.append({
-                "text": text,
-                "row": c_in[3] if len(c_in) > 3 else 12,
-                "col": c_in[4] if len(c_in) > 4 else 12,
-                "color": c_in[5] if len(c_in) > 5 else "black",
-                "box": str(c_in[6]).lower() == "true" if len(c_in) > 6 else True,
-            })
-            self.log(f"  [{inst.line_num}] disp_message: 窗口 #{win.handle} 显示文字 '{text}'")
+            row_val = c_in[3] if len(c_in) > 3 else 12
+            col_val = c_in[4] if len(c_in) > 4 else 12
+            color = c_in[5] if len(c_in) > 5 else "black"
+            box = str(c_in[6]).lower() == "true" if len(c_in) > 6 else True
+            per_position = (isinstance(text_val, list) and isinstance(row_val, list) and isinstance(col_val, list)
+                            and len(text_val) == len(row_val) == len(col_val) and len(text_val) > 0)
+            if per_position:
+                for item, row, col in zip(text_val, row_val, col_val):
+                    win.messages.append({"text": str(item), "row": row, "col": col, "color": color, "box": box})
+                self.log(f"  [{inst.line_num}] disp_message: 窗口 #{win.handle} 在 {len(text_val)} 个位置分别显示文字")
+            else:
+                win.messages.append({"text": text, "row": row_val, "col": col_val, "color": color, "box": box})
+                self.log(f"  [{inst.line_num}] disp_message: 窗口 #{win.handle} 显示文字 '{text}'")
 
         else:
-            self.log(f"  [{inst.line_num}] 未实现或通用算子 '{op}', 跳过执行")
+            raise NotImplementedError(f"算子 '{op}' 本平台尚未实现")
+
+    @staticmethod
+    def _make_thumbnail(arr: np.ndarray) -> str:
+        """生成变量窗口使用的缩略图 (等比缩放到长边 THUMBNAIL_MAX_SIDE 像素)"""
+        if arr.dtype != np.uint8:
+            lo, hi = float(arr.min()), float(arr.max())
+            arr = ((arr - lo) / (hi - lo) * 255).astype(np.uint8) if hi > lo else np.zeros(arr.shape, dtype=np.uint8)
+        scale = THUMBNAIL_MAX_SIDE / max(arr.shape[:2])
+        if scale < 1:
+            size = (max(1, round(arr.shape[1] * scale)), max(1, round(arr.shape[0] * scale)))
+            arr = cv2.resize(arr, size, interpolation=cv2.INTER_AREA)
+        return encode_image_base64(arr)
+
+    def _pin_display_object(self, overlay: List[str], name: str, obj: Any) -> None:
+        """记录 dev_display 那一刻的对象快照: 同名变量被重新赋值后再次显示, 先前显示的内容仍留在叠加层里 (与 HALCON 一致)"""
+        if any(self._display_snapshots.get(key) is obj for key in overlay):
+            return
+        key = f"{name}#{len(self._display_snapshots) + 1}"
+        self._display_snapshots[key] = obj
+        overlay.append(key)
 
     def _list_iconic_vars(self) -> List[Dict[str, Any]]:
         """枚举当前所有的 Iconic 图像/几何变量信息"""
@@ -1407,14 +1639,18 @@ class HDevInterpreter:
                     "name": k,
                     "type": "Image",
                     "shape": list(v.shape),
-                    "dtype": str(v.dtype)
+                    "dtype": str(v.dtype),
+                    "thumbnail": self._make_thumbnail(v)
                 })
             elif isinstance(v, Region):
                 out.append({
                     "name": k,
                     "type": "Region",
-                    "object_count": len(v.objects),
-                    "is_connected": v.is_connected
+                    "object_count": v.count,
+                    "is_connected": v.is_connected,
+                    "area": int(np.count_nonzero(v.mask)),
+                    "shape": list(v.mask.shape),
+                    "thumbnail": self._make_thumbnail(v.mask)
                 })
             elif isinstance(v, list) and v and isinstance(v[0], XLDContour):
                 out.append({
@@ -1452,10 +1688,10 @@ class HDevInterpreter:
         merged_mask = None
         all_objects: List[Dict[str, Any]] = []
         for name in win.region_names:
-            reg = self.iconic_vars.get(name)
+            reg = self._display_snapshots.get(name)
             if not isinstance(reg, Region) or base_img is None:
                 continue
-            color_mask = create_colored_label_mask(reg, base_img.shape[:2])
+            color_mask = create_colored_label_mask(reg, base_img.shape[:2], alpha=HDEV_REGION_ALPHA)
             if merged_mask is None:
                 merged_mask = color_mask
             else:
@@ -1479,9 +1715,9 @@ class HDevInterpreter:
 
         all_contours: List[List[Tuple[float, float]]] = []
         for name in win.xld_names:
-            xld_list = self.iconic_vars.get(name)
+            xld_list = self._display_snapshots.get(name)
             if isinstance(xld_list, list):
-                all_contours.extend([c.points for c in xld_list if isinstance(c, XLDContour)])
+                all_contours.extend([[[p[1], p[0]] for p in c.points] for c in xld_list if isinstance(c, XLDContour)])
         res["contours"] = all_contours
 
         return res
@@ -1543,7 +1779,7 @@ class HDevInterpreter:
             res["preview_base64"] = encode_image_base64(_draw_messages(target, messages))
         elif isinstance(target, Region):
             if base_img is not None:
-                color_mask = create_colored_label_mask(target, base_img.shape[:2])
+                color_mask = create_colored_label_mask(target, base_img.shape[:2], alpha=HDEV_REGION_ALPHA)
                 res["mask_base64"] = encode_image_base64(color_mask)
             res["objects"] = [
                 {
@@ -1558,7 +1794,7 @@ class HDevInterpreter:
                 for obj in target.objects
             ]
         elif isinstance(target, list) and target and isinstance(target[0], XLDContour):
-            res["contours"] = [c.points for c in target]
+            res["contours"] = [[[p[1], p[0]] for p in c.points] for c in target]
 
         res["windows"] = []
         return res

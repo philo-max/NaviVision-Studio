@@ -476,8 +476,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const lineNumbersEl = document.getElementById('editorLineNumbers');
   const terminalLogsEl = document.getElementById('terminalLogs');
 
+  let scriptOpacityApplied = false;
+
   function renderScriptResultToViewport(result) {
     // 脚本沙箱返回结果 (或某个图形窗口的合成画面)，投射到 Viewport
+    if (!scriptOpacityApplied) {
+      // HALCON 风格: 区域默认不透明填充; 仅首次运行时设置, 之后尊重用户对透明滑块的调整
+      scriptOpacityApplied = true;
+      viewport.maskOpacity = 1;
+      document.getElementById('rangeOpacity').value = 100;
+    }
     if (result.preview_base64) {
       viewport.renderImage(result.preview_base64);
     }
@@ -493,6 +501,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!compareView.hidden) refreshCompareView();
     renderScriptResultToViewport(result);
   });
+
+  // draw_circle 读取用户已在视口里画好的 ROI
+  codeEditor.getRoi = () => viewport.roiGeometry;
 
   // 多图形窗口标签页切换: 直接用该窗口已合成好的画面数据重绘视口, 无需重新执行脚本
   codeEditor.onWindowSelect = (win) => {

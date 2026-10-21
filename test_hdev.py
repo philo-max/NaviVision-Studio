@@ -636,6 +636,79 @@ class TestHDevelopEngine(unittest.TestCase):
         self.assertTrue(res["success"], res.get("error"))
         self.assertFalse([line for line in it.stdout if "跳过执行" in line])
 
+    def test_unconnected_region_counts_as_one_object_and_draws_opaque(self):
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script("threshold (Image, Region, 0, 10)\ndev_display (Region)")
+        self.assertTrue(res["success"], res.get("error"))
+        listed = {v["name"]: v for v in it._list_iconic_vars()}
+        self.assertEqual(listed["Region"]["object_count"], 1)
+        import base64, cv2
+        payload = it._build_visualization_payload()
+        mask = cv2.imdecode(np.frombuffer(base64.b64decode(payload["mask_base64"].split(",")[-1]), np.uint8), cv2.IMREAD_UNCHANGED)
+        self.assertEqual(int(mask[100, 150, 3]), 255)
+
+    def test_fill_up_and_difference_extract_holes(self):
+        img = self._morph_image()
+        img[90:110, 120:160] = 255
+        script = (
+            "threshold (Image, Region, 0, 10)\n"
+            "fill_up (Region, RegionFilled)\n"
+            "difference (RegionFilled, Region, Holes)\n"
+            "connection (Holes, SingleHoles)\n"
+            "count_obj (SingleHoles, Number)\n"
+            "area_center (SingleHoles, Area, Row, Column)"
+        )
+        it = HDevInterpreter(base_image=img)
+        res = it.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(it.control_vars["Number"], 1)
+        self.assertEqual(it.control_vars["Area"], [800])
+        self.assertEqual(int(np.count_nonzero(it.iconic_vars["RegionFilled"].mask)), 80 * 140)
+
+    def test_region_set_operations_and_boundary(self):
+        script = (
+            "gen_rectangle1 (A, 10, 10, 49, 49)\n"
+            "gen_circle (B, 30, 30, 5)\n"
+            "union2 (A, B, U)\n"
+            "intersection (A, B, I)\n"
+            "complement (A, C)\n"
+            "boundary (A, Inner, 'inner')\n"
+            "boundary (A, Outer, 'outer')"
+        )
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+        count = lambda name: int(np.count_nonzero(it.iconic_vars[name].mask))
+        self.assertEqual(count("A"), 40 * 40)
+        self.assertEqual(count("U"), count("A"))
+        self.assertEqual(count("I"), count("B"))
+        self.assertEqual(count("C"), 200 * 300 - 40 * 40)
+        self.assertEqual(count("Inner"), 40 * 40 - 38 * 38)
+        self.assertEqual(count("Outer"), 4 * 40)
+        bad = HDevInterpreter(base_image=self._morph_image()).execute_script("boundary (A, B, 'middle')")
+        self.assertFalse(bad["success"])
+
+    def test_unimplemented_operator_fails_instead_of_skipping(self):
+        res = HDevInterpreter(base_image=self._morph_image()).execute_script("not_a_real_operator (Image, Out)")
+        self.assertFalse(res["success"])
+        self.assertIn("not_a_real_operator", res["error"])
+        self.assertIn("尚未实现", res["error"])
+
+    def test_display_style_operators_are_accepted(self):
+        script = "dev_set_colored (6)\nset_display_font (WindowHandle, 14, 'mono', 'true', 'false')"
+        res = HDevInterpreter(base_image=self._morph_image()).execute_script(script)
+        self.assertTrue(res["success"], res.get("error"))
+
+    def test_iconic_vars_carry_thumbnails_and_sizes(self):
+        it = HDevInterpreter(base_image=self._morph_image())
+        res = it.execute_script("threshold (Image, Region, 0, 10)")
+        self.assertTrue(res["success"], res.get("error"))
+        listed = {v["name"]: v for v in it._list_iconic_vars()}
+        self.assertTrue(listed["Image"]["thumbnail"].startswith("data:image/png;base64,"))
+        self.assertEqual(listed["Region"]["area"], 80 * 140)
+        self.assertEqual(listed["Region"]["shape"], [200, 300])
+        self.assertTrue(listed["Region"]["thumbnail"].startswith("data:image/png;base64,"))
+
     def test_select_obj_in_loop_collects_areas(self):
         card_path = str(self.project_root / "samples" / "social_card.png").replace("\\", "/")
         script = (

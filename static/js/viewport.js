@@ -175,6 +175,9 @@ class StudioViewport {
       if (this.showImage) {
         this.ctxImg.drawImage(img, 0, 0);
       }
+      // 重设画布尺寸会清空遮罩层与轮廓层, 按已保存的状态补画, 否则先于图像加载完成而画好的轮廓 / ROI 会丢失
+      this.redrawMask();
+      this.redrawContours();
       this.fitToWindow();
     };
     img.src = imgSrc;

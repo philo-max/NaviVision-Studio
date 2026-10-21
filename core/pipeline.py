@@ -35,15 +35,19 @@ def _compute_step_fingerprint(prev_fp: str, op: str, params: Dict[str, Any], ena
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def create_colored_label_mask(region: Region, base_shape: Tuple[int, int]) -> np.ndarray:
-    """为连通域渲染高对比色彩叠加层 (仿 HALCON 彩色多通道 Region 显示)"""
+def create_colored_label_mask(
+    region: Region,
+    base_shape: Tuple[int, int],
+    alpha: Optional[int] = None
+) -> np.ndarray:
+    """为连通域渲染高对比色彩叠加层 (仿 HALCON 彩色多通道 Region 显示); alpha 给定时覆盖默认的半透明度"""
     h, w = base_shape[:2]
     color_mask = np.zeros((h, w, 4), dtype=np.uint8)  # RGBA
-    
+
     if not region.is_connected or not region.objects:
         # 单一区域，使用标志性亮荧光青色 (Cyan)
         y_idx, x_idx = np.where(region.mask > 0)
-        color_mask[y_idx, x_idx] = [0, 240, 255, 140]  # R, G, B, Alpha
+        color_mask[y_idx, x_idx] = [0, 240, 255, 140 if alpha is None else alpha]  # R, G, B, Alpha
         return color_mask
 
     # 预设高饱和度区别色系 (P5 / Cyberpunk 风格调色板)
@@ -66,7 +70,7 @@ def create_colored_label_mask(region: Region, base_shape: Tuple[int, int]) -> np
         y, x, y2, x2 = obj.bbox
         sub_mask = region.mask[y:y2, x:x2]
         yy, xx = np.where(sub_mask > 0)
-        color_mask[y + yy, x + xx] = [color[0], color[1], color[2], 160]
+        color_mask[y + yy, x + xx] = [color[0], color[1], color[2], 160 if alpha is None else alpha]
         
     return color_mask
 

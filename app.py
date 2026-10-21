@@ -393,6 +393,7 @@ async def run_custom_script(request: Request, req: ScriptRunRequest):
 class HDevRunRequest(BaseModel):
     code: str
     display_target: Optional[str] = None
+    roi: Optional[Dict[str, Any]] = None
 
 
 class HDevTranspileRequest(BaseModel):
@@ -409,6 +410,7 @@ async def run_hdev_script(request: Request, req: HDevRunRequest):
     pipeline = get_pipeline(request)
     sid = request.headers.get("X-Session-ID") or "default"
     interpreter = HDevInterpreter(base_image=pipeline.source_image, session_id=sid)
+    interpreter.roi_geometry = req.roi
     if req.display_target:
         interpreter.display_target = req.display_target
     res = interpreter.execute_script(req.code, timeout_sec=3.0)
@@ -458,6 +460,7 @@ _debug_sessions = _DebugSessionRegistry()
 
 class HDevDebugStartRequest(BaseModel):
     code: str
+    roi: Optional[Dict[str, Any]] = None
 
 
 class HDevDebugContinueRequest(BaseModel):
@@ -470,6 +473,7 @@ async def hdev_debug_start(request: Request, req: HDevDebugStartRequest):
     pipeline = get_pipeline(request)
     sid = request.headers.get("X-Session-ID") or "default"
     interpreter = HDevInterpreter(base_image=pipeline.source_image, session_id=sid)
+    interpreter.roi_geometry = req.roi
     res = interpreter.load_script(req.code)
     _debug_sessions.start(sid, interpreter)
     return JSONResponse(content=res)
