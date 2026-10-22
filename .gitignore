@@ -44,3 +44,7 @@ result_output.png
 .pytest_cache/
 .coverage
 htmlcov/
+
+dist_onefile/
+build_onefile/
+release/

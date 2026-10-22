@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "navivision-studio",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 8080
+    },
+    {
+      "name": "navivision-studio-attach",
+      "url": "http://localhost:8080",
+      "port": 8080
+    }
+  ]
+}

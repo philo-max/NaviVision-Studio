@@ -7,6 +7,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 1. 初始化 Viewport
   const viewportStage = document.getElementById('viewportStage');
   const viewport = new StudioViewport(viewportStage);
+  const resultsPanel = new ResultsPanel(document.getElementById('resultsDock'), {
+    onHighlight: (id) => viewport.highlightObject(id)
+  });
 
   // 2. 初始化 Pipeline UI
   const pipelineListEl = document.getElementById('pipelineList');
@@ -14,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentSamples = [];
   let currentResults = [];
+  let lastCodeRunResult = null;
 
   // 0. 多租户会话 ID 管理
   let sessionId = localStorage.getItem('navivision_session_id');
@@ -60,8 +64,22 @@ document.addEventListener('DOMContentLoaded', () => {
     updateObjectTable();
   };
 
-  // 3. 根据当前激活步骤刷新视口
+  // 3. 根据当前激活步骤刷新视口与空工作区状态
+  const emptyStateEl = document.getElementById('emptyState');
+  function syncEmptyState() {
+    if (emptyStateEl) {
+      emptyStateEl.hidden = currentResults.length > 0 || !!viewport.baseImage;
+    }
+  }
+  const btnEmptyOpen = document.getElementById('btnEmptyOpen');
+  if (btnEmptyOpen) {
+    btnEmptyOpen.addEventListener('click', () => {
+      document.getElementById('uploadInput').click();
+    });
+  }
+
   function updateViewportFromActiveStep() {
+    syncEmptyState();
     const step = pipelineUI.getActiveStep();
     const res = pipelineUI.getActiveResult();
     if (!res) return;
@@ -97,97 +115,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 4. 更新特征数据表 (Tab 2)
+  // 4. 更新结果面板的目标特征表
   function updateObjectTable() {
-    const tableBody = document.getElementById('objectTableBody');
-    const tableContainer = document.getElementById('tableContainer');
-    if (!tableBody) return;
-
-    // 查找包含对象列表的最近结果
     const targetRes = [...currentResults].reverse().find(r => r.summary?.objects || r.summary?.objects_info);
-    const objects = targetRes?.summary?.objects || targetRes?.summary?.objects_info || [];
-
-    const countBadge = document.getElementById('tabObjCount');
-    if (countBadge) countBadge.textContent = `(${objects.length})`;
-
-    if (objects.length === 0) {
-      tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">当前步骤无连通域对象</td></tr>';
-      return;
-    }
-
-    let html = '';
-    objects.forEach(obj => {
-      const circ = obj.circularity !== undefined ? obj.circularity : 'N/A';
-      const centroidStr = obj.centroid ? `(${obj.centroid[0]}, ${obj.centroid[1]})` : 'N/A';
-      html += `
-        <tr data-obj-id="${obj.id}">
-          <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
-          <td>${obj.area}</td>
-          <td>${circ}</td>
-          <td>${centroidStr}</td>
-          <td style="font-size:10px;color:var(--text-muted);">${obj.bbox ? `[${obj.bbox.join(',')}]` : ''}</td>
-        </tr>
-      `;
-    });
-    tableBody.innerHTML = html;
-
-    // 表格行点击高亮对应连通域
-    tableBody.querySelectorAll('tr').forEach(row => {
-      row.addEventListener('mouseenter', () => {
-        const id = parseInt(row.dataset.objId);
-        viewport.highlightObject(id);
-      });
-      row.addEventListener('mouseleave', () => {
-        viewport.highlightObject(null);
-      });
-    });
+    resultsPanel.setObjects(targetRes?.summary?.objects || targetRes?.summary?.objects_info || []);
   }
 
-  // 5. 加载样本列表
-  async function loadSamplesList() {
+  // 5. 恢复会话流水线 (若已有会话)
+  async function restoreSession() {
     try {
-      const resp = await apiFetch('/api/samples');
-      currentSamples = await resp.json();
-      const sel = document.getElementById('sampleSelect');
-      sel.innerHTML = '';
-      currentSamples.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = `${s.title}`;
-        sel.appendChild(opt);
-      });
+      const exported = await (await apiFetch('/api/project/export')).json();
+      if (!Array.isArray(exported.steps) || exported.steps.length === 0) return;
 
-      // 默认加载第一个样本
-      if (currentSamples.length > 0) {
-        loadSampleById(currentSamples[0].id);
-      }
-    } catch (err) {
-      console.error('Failed to load samples:', err);
-    }
-  }
-
-  async function loadSampleById(id) {
-    try {
-      const resp = await apiFetch('/api/load_sample', {
+      const resp = await apiFetch('/api/project/import', {
         method: 'POST',
-        body: JSON.stringify({ id })
+        body: JSON.stringify({ steps: exported.steps })
       });
       const data = await resp.json();
       if (data.success) {
         currentResults = data.results;
-        viewport.baseImage = null; // 重置底图缓存
+        viewport.baseImage = null;
         pipelineUI.setPipelineData(data.steps, data.results);
         updateViewportFromActiveStep();
         updateObjectTable();
       }
     } catch (err) {
-      console.error('Failed to switch sample:', err);
+      console.error('Failed to restore session:', err);
     }
   }
-
-  document.getElementById('sampleSelect').addEventListener('change', (e) => {
-    loadSampleById(e.target.value);
-  });
 
   // 6. 本地图片上传
   const uploadInput = document.getElementById('uploadInput');
@@ -294,6 +249,82 @@ document.addEventListener('DOMContentLoaded', () => {
     viewport.resetZoom();
   });
 
+  // 8b. ROI 绘制工具栏
+  const _setRoiBtn = (activeMode) => {
+    ['btnRoiRect', 'btnRoiCircle', 'btnRoiPoly'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('active', id === activeMode);
+    });
+  };
+  document.getElementById('btnRoiRect').addEventListener('click', () => {
+    const m = viewport.setRoiMode('rect'); _setRoiBtn(m === 'rect' ? 'btnRoiRect' : null);
+  });
+  document.getElementById('btnRoiCircle').addEventListener('click', () => {
+    const m = viewport.setRoiMode('circle'); _setRoiBtn(m === 'circle' ? 'btnRoiCircle' : null);
+  });
+  document.getElementById('btnRoiPoly').addEventListener('click', () => {
+    const m = viewport.setRoiMode('polygon'); _setRoiBtn(m === 'polygon' ? 'btnRoiPoly' : null);
+  });
+  document.getElementById('btnRoiClear').addEventListener('click', () => {
+    viewport.clearRoi(); _setRoiBtn(null);
+  });
+
+  // 8c. 前后对比视图: 并排显示"处理前"原始底图与"处理后"最终结果
+  const compareView = document.getElementById('compareView');
+  const compareBeforeImg = document.getElementById('compareBeforeImg');
+  const compareAfterImg = document.getElementById('compareAfterImg');
+  const btnToggleCompare = document.getElementById('btnToggleCompare');
+
+  function refreshCompareView() {
+    let beforeSrc = null;
+    let afterSrc = null;
+    if (lastCodeRunResult) {
+      // 代码工作台模式: 使用脚本执行前后的快照
+      beforeSrc = lastCodeRunResult.original_base64;
+      afterSrc = lastCodeRunResult.preview_base64;
+    } else {
+      // 流水线模式: 使用原始载入图与当前激活步骤的输出
+      const readStepRes = currentResults.find(r => r.operator === 'read_image');
+      const activeRes = pipelineUI.getActiveResult?.();
+      beforeSrc = readStepRes ? readStepRes.preview_base64 : null;
+      afterSrc = activeRes ? (activeRes.preview_base64 || activeRes.mask_base64) : null;
+    }
+    compareBeforeImg.src = beforeSrc || '';
+    compareAfterImg.src = afterSrc || '';
+  }
+
+  if (btnToggleCompare) {
+    btnToggleCompare.addEventListener('click', () => {
+      const willShow = compareView.hidden;
+      if (willShow) refreshCompareView();
+      compareView.hidden = !willShow;
+      btnToggleCompare.classList.toggle('active', willShow);
+    });
+  }
+
+  // 多边形: 双击 / Enter 闭合
+  viewport.stage.addEventListener('dblclick', () => {
+    if (viewport.roiMode === 'polygon') { viewport.finishPolygon(); _setRoiBtn(null); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && viewport.roiMode === 'polygon') { viewport.finishPolygon(); _setRoiBtn(null); }
+  });
+  // ROI 绘制完成 -> 写入当前激活的 reduce_domain 步骤
+  viewport.onRoiComplete = (geometry) => {
+    const step = pipelineUI.steps.find(st => st.id === pipelineUI.activeStepId);
+    if (step && step.operator === 'reduce_domain') {
+      step.params = step.params || {};
+      if (geometry) {
+        step.params.geometry = geometry;
+        step.params.roi_type = geometry.type;
+      } else {
+        delete step.params.geometry;
+      }
+      pipelineUI.renderInspector?.();
+      pipelineUI.emitUpdateDebounced();
+    }
+  };
+
   // 图层开关
   document.getElementById('chkLayerImage').addEventListener('change', (e) => {
     viewport.showImage = e.target.checked;
@@ -317,26 +348,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('rangeOpacity').addEventListener('input', (e) => {
     viewport.maskOpacity = parseFloat(e.target.value) / 100;
     viewport.redrawMask();
-  });
-
-  // 9. 右侧 Tab 切换
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabInspector = document.getElementById('tabInspector');
-  const tabObjects = document.getElementById('tabObjects');
-
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const target = btn.dataset.tab;
-      if (target === 'inspector') {
-        tabInspector.style.display = 'flex';
-        tabObjects.style.display = 'none';
-      } else {
-        tabInspector.style.display = 'none';
-        tabObjects.style.display = 'flex';
-      }
-    });
   });
 
   // 10. 代码导出模态框 (Code Exporter)
@@ -385,55 +396,158 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(url);
   });
 
-  // 11. 初始化交互式 Python 代码工作室 (Code Mode)
+  // 导出 HDevelop (.hdev) 脚本
+  const btnExportHdev = document.getElementById('btnExportHdev');
+  if (btnExportHdev) {
+    btnExportHdev.addEventListener('click', async () => {
+      try {
+        const resp = await apiFetch('/api/hdev/from_pipeline', {
+          method: 'POST',
+          body: JSON.stringify({ format: 'plain' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+          const blob = new Blob([data.code], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'navivision_script.hdev';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      } catch (err) {
+        alert('导出 HDevelop 脚本失败: ' + err);
+      }
+    });
+  }
+
+  // 导入 HDevelop (.hdev / .hdvp) 脚本
+  const btnUploadHdev = document.getElementById('btnUploadHdev');
+  const hdevFileInput = document.getElementById('hdevFileInput');
+  if (btnUploadHdev && hdevFileInput) {
+    btnUploadHdev.addEventListener('click', () => {
+      hdevFileInput.click();
+    });
+    hdevFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const resp = await fetch('/api/hdev/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await resp.json();
+        if (data.success) {
+          btnModeCode.click();
+          const langSelect = document.getElementById('codeLangSelect');
+          if (langSelect) {
+            langSelect.value = 'hdev';
+            codeEditor.updateLanguageUI('hdev');
+          }
+          codeEditor.editor.value = data.code;
+          codeEditor.updateLineNumbers();
+          codeEditor.logToConsole(`[✓] 成功载入外部 HDevelop 脚本 '${data.filename}' (共 ${data.instruction_count} 条有效指令)`, 'success');
+          codeEditor.runScript();
+        }
+      } catch (err) {
+        alert('导入并解析 .hdev 文件失败: ' + err);
+      } finally {
+        hdevFileInput.value = '';
+      }
+    });
+  }
+
+  // 监听 HDevelop 脚本转译同步到流水线事件
+  window.addEventListener('navivision:pipeline-synced', (e) => {
+    const data = e.detail;
+    if (data && data.steps) {
+      currentResults = data.results || [];
+      pipelineUI.setPipelineData(data.steps, currentResults);
+      updateViewportFromActiveStep();
+      updateObjectTable();
+      btnModePipeline.click();
+    }
+  });
+
+  // 11. 初始化交互式代码工作室 (Code Mode)
   const scriptEditorEl = document.getElementById('scriptEditor');
   const lineNumbersEl = document.getElementById('editorLineNumbers');
   const terminalLogsEl = document.getElementById('terminalLogs');
 
-  const codeEditor = new InteractiveCodeEditor(scriptEditorEl, lineNumbersEl, terminalLogsEl, (result) => {
-    // 脚本沙箱返回结果，投射到 Viewport
+  let scriptOpacityApplied = false;
+
+  function renderScriptResultToViewport(result) {
+    // 脚本沙箱返回结果 (或某个图形窗口的合成画面)，投射到 Viewport
+    if (!scriptOpacityApplied) {
+      // HALCON 风格: 区域默认不透明填充; 仅首次运行时设置, 之后尊重用户对透明滑块的调整
+      scriptOpacityApplied = true;
+      viewport.maskOpacity = 1;
+      document.getElementById('rangeOpacity').value = 100;
+    }
     if (result.preview_base64) {
       viewport.renderImage(result.preview_base64);
     }
-    if (result.mask_base64) {
-      viewport.renderMask(result.mask_base64, result.objects || []);
-    }
-    if (result.contours && result.contours.length > 0) {
-      viewport.renderContours(result.contours);
-    }
-    if (result.objects && result.objects.length > 0) {
-      const tableBody = document.getElementById('objectTableBody');
-      const countBadge = document.getElementById('tabObjCount');
-      if (countBadge) countBadge.textContent = `(${result.objects.length})`;
-      if (tableBody) {
-        let html = '';
-        result.objects.forEach(obj => {
-          const circ = obj.circularity !== undefined ? obj.circularity : 'N/A';
-          const centroidStr = obj.centroid ? `(${Math.round(obj.centroid[0])}, ${Math.round(obj.centroid[1])})` : 'N/A';
-          html += `
-            <tr data-obj-id="${obj.id}">
-              <td style="color:var(--neon-cyan);font-weight:bold;">#${obj.id}</td>
-              <td>${obj.area}</td>
-              <td>${circ}</td>
-              <td>${centroidStr}</td>
-              <td style="font-size:10px;color:var(--text-muted);">${obj.bbox ? `[${obj.bbox.join(',')}]` : ''}</td>
-            </tr>
-          `;
-        });
-        tableBody.innerHTML = html;
-      }
-    }
+    viewport.renderMask(result.mask_base64 || null, result.objects || []);
+    viewport.renderContours(result.contours || []);
+
+    resultsPanel.setObjects(result.objects || []);
+    if ('ocr' in result) resultsPanel.setOcr(result.ocr);
+  }
+
+  const codeEditor = new InteractiveCodeEditor(scriptEditorEl, lineNumbersEl, terminalLogsEl, (result) => {
+    lastCodeRunResult = result;
+    if (!compareView.hidden) refreshCompareView();
+    renderScriptResultToViewport(result);
   });
 
-  // 运行代码按钮
-  document.getElementById('btnRunScript').addEventListener('click', () => {
-    codeEditor.runScript();
+  // draw_circle 读取用户已在视口里画好的 ROI
+  codeEditor.getRoi = () => viewport.roiGeometry;
+
+  // 多图形窗口标签页切换: 直接用该窗口已合成好的画面数据重绘视口, 无需重新执行脚本
+  codeEditor.onWindowSelect = (win) => {
+    renderScriptResultToViewport(win);
+  };
+
+  // 单步调试控制按钮: 开始 / 单步 / 继续(断点) / 停止
+  document.getElementById('btnDebugStart').addEventListener('click', () => {
+    codeEditor.debugStart();
+  });
+  document.getElementById('btnDebugStep').addEventListener('click', () => {
+    codeEditor.debugStep();
+  });
+  document.getElementById('btnDebugContinue').addEventListener('click', () => {
+    codeEditor.debugContinue();
+  });
+  document.getElementById('btnDebugStop').addEventListener('click', () => {
+    codeEditor.debugStop();
   });
 
-  // 模板切换
-  document.getElementById('codeTemplateSelect').addEventListener('change', (e) => {
-    codeEditor.loadTemplate(e.target.value);
-  });
+  // 算法命令手册初始化与事件绑定
+  const manualModal = document.getElementById('manualModal');
+  const manualManager = new OperatorManualManager(manualModal, codeEditor);
+
+  const btnOpenManual = document.getElementById('btnOpenManual');
+  if (btnOpenManual) {
+    btnOpenManual.addEventListener('click', () => {
+      manualManager.open();
+    });
+  }
+
+  const btnCloseManualModal = document.getElementById('btnCloseManualModal');
+  if (btnCloseManualModal) {
+    btnCloseManualModal.addEventListener('click', () => {
+      manualManager.close();
+    });
+  }
+
+  const btnCloseManualModalBtn = document.getElementById('btnCloseManualModalBtn');
+  if (btnCloseManualModalBtn) {
+    btnCloseManualModalBtn.addEventListener('click', () => {
+      manualManager.close();
+    });
+  }
 
   // 清屏按钮
   document.getElementById('btnClearTerminal').addEventListener('click', () => {
@@ -443,6 +557,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 模式切换: 流水线 vs 代码工作室
   const btnModePipeline = document.getElementById('btnModePipeline');
   const btnModeCode = document.getElementById('btnModeCode');
+  const btnTopRunScript = document.getElementById('btnTopRunScript');
   const panelPipeline = document.getElementById('panelPipeline');
   const panelCodeStudio = document.getElementById('panelCodeStudio');
 
@@ -451,6 +566,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnModeCode.classList.remove('active');
     panelPipeline.style.display = 'flex';
     panelCodeStudio.style.display = 'none';
+    if (btnTopRunScript) btnTopRunScript.style.display = 'none';
+    lastCodeRunResult = null;
+    resultsPanel.setOcr(null);
+    if (!compareView.hidden) refreshCompareView();
   });
 
   btnModeCode.addEventListener('click', () => {
@@ -458,8 +577,16 @@ document.addEventListener('DOMContentLoaded', () => {
     btnModePipeline.classList.remove('active');
     panelPipeline.style.display = 'none';
     panelCodeStudio.style.display = 'flex';
+    if (btnTopRunScript) btnTopRunScript.style.display = 'inline-flex';
     codeEditor.updateLineNumbers();
   });
+
+  if (btnTopRunScript) {
+    btnTopRunScript.addEventListener('click', () => {
+      const btnRun = document.getElementById('btnRunScript');
+      if (btnRun) btnRun.click();
+    });
+  }
 
   // 12. 开放 API 接入中心模态框
   const apiModal = document.getElementById('apiModal');
@@ -544,6 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 启动加载
-  loadSamplesList();
+  // 启动: 空工作区, 若服务端会话已有流水线则恢复
+  syncEmptyState();
+  restoreSession();
 });

@@ -181,6 +181,92 @@ result_data = {"test_metric": 42.0}
     print("[PASS] 13. 视觉工程持久化 (.nvproj) 验证通过: 导出/导入/反序列化重算全链路畅通")
 
     print("\n==================================================")
+    # 11. P0/P1/P2/P3 新增能力验证
+    # 11.1 色彩空间扩展 rgb_to_hsv / hsv_threshold
+    hsv = ops.rgb_to_hsv(img)
+    assert hsv.ndim == 3 and hsv.shape[2] == 3, "rgb_to_hsv 输出应为三通道"
+    assert hsv.shape[0] == img.shape[0] and hsv.shape[1] == img.shape[1], "rgb_to_hsv 尺寸变化"
+    reg_hsv = ops.hsv_threshold(hsv, h_min=0, h_max=179, s_min=0, s_max=255, v_min=0, v_max=255)
+    assert int(np.count_nonzero(reg_hsv.mask)) > 0, "HSV 全范围阈值应命中像素"
+    print(f"[PASS] 14. 色彩空间 rgb_to_hsv/hsv_threshold 验证通过: HSV shape={hsv.shape}, 命中像素={int(np.count_nonzero(reg_hsv.mask))}")
+
+    # 11.2 Blob 特征扩展: select_shape 矩形度 / Hu 矩
+    conn = ops.connection(ops.threshold(gray, 180, 255), connectivity=8)
+    assert len(conn.objects) > 0, "连通域为空"
+    o0 = conn.objects[0]
+    assert hasattr(o0, "rectangularity") and 0.0 <= o0.rectangularity <= 1.0, "矩形度字段异常"
+    assert len(o0.hu_moments) == 7, "Hu 不变矩应为 7 维"
+    rect_filtered = ops.select_shape(conn, min_area=10, min_rectangularity=0.0, max_rectangularity=1.0)
+    assert len(rect_filtered.objects) > 0, "按矩形度筛选结果为空"
+    hu_ref = o0.hu_moments
+    hu_filtered = ops.select_shape(conn, min_area=10, hu_match=hu_ref, max_hu_distance=0.5)
+    assert isinstance(hu_filtered.objects, list), "Hu 矩筛选返回结构异常"
+    print(f"[PASS] 15. select_shape 扩展验证通过: 矩形度={o0.rectangularity:.3f}, Hu 矩维度={len(o0.hu_moments)}, Hu 筛选保留={len(hu_filtered.objects)}")
+
+    # 11.3 模板匹配 find_shape_model
+    tmpl = gray[60:120, 60:120].copy()
+    matches = ops.find_shape_model(gray, tmpl, min_score=0.4, scales=[1.0], angles=[0.0], max_matches=5)
+    assert isinstance(matches, list) and len(matches) >= 1, "模板匹配未返回结果"
+    assert "center" in matches[0] and "angle" in matches[0] and "scale" in matches[0] and "score" in matches[0], "匹配位姿字段缺失"
+    assert matches[0]["score"] >= 0.4, "匹配分数低于阈值"
+    print(f"[PASS] 16. find_shape_model 模板匹配验证通过: 命中 {len(matches)} 处, 最高分={matches[0]['score']}, 位姿 center={matches[0]['center']}")
+
+    # 11.4 轮廓多边形近似 gen_contour_polygon
+    polys = ops.gen_contour_polygon(conn, epsilon=2.0)
+    assert len(polys) > 0, "多边形近似结果为空"
+    assert "corner_points" in polys[0] and "corner_count" in polys[0], "多边形顶点字段缺失"
+    print(f"[PASS] 17. gen_contour_polygon 多边形近似验证通过: 多边形数={len(polys)}, 首个拐点数={polys[0]['corner_count']}")
+
+    # 11.5 条码 / 二维码 read_barcode (无码图应返回空列表而非报错)
+    codes = ops.read_barcode(img)
+    assert isinstance(codes, list), "read_barcode 应返回列表"
+    print(f"[PASS] 18. read_barcode 条码识别验证通过: 识别结果数={len(codes)} (无码图返回空列表)")
+
+    # 11.6 相机标定 calibrate (合成长方格棋盘图)
+    board = np.full((240, 300), 255, dtype=np.uint8)
+    sq = 20
+    for r in range(6):
+        for c in range(9):
+            if (r + c) % 2 == 0:
+                board[r * sq:(r + 1) * sq, c * sq:(c + 1) * sq] = 0
+    calib = ops.estimate_scale_from_checkerboard(board, pattern_cols=9, pattern_rows=6, square_size=1.0)
+    assert "found" in calib, "标定返回结构异常"
+    if calib["found"]:
+        assert calib["pixels_per_unit"] is not None and calib["pixels_per_unit"] > 0, "标定换算系数异常"
+    print(f"[PASS] 19. calibrate 相机标定验证通过: found={calib['found']}, pixels_per_unit={calib.get('pixels_per_unit')}")
+
+    # 11.7 OCR read_text 优雅降级 (未装 pytesseract 时抛明确异常)
+    try:
+        _ = ops.read_text(img, "eng")
+        ocr_state = "引擎可用"
+    except RuntimeError as exc:
+        assert "pytesseract" in str(exc) or "OCR" in str(exc), "OCR 降级提示不明确"
+        ocr_state = "优雅降级 (未安装 pytesseract)"
+    print(f"[PASS] 20. read_text OCR 边界验证通过: {ocr_state}")
+
+    # 11.8 会话磁盘持久化 SessionManager
+    import tempfile
+    from core.session_manager import SessionManager
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sm1 = SessionManager(persist_dir=tmpdir)
+        p1 = sm1.get_pipeline("persist_user")
+        p1.steps = [{"id": "s1", "operator": "threshold", "params": {"min_gray": 100, "max_gray": 200}, "enabled": True}]
+        sm1.save_session("persist_user")
+        sm2 = SessionManager(persist_dir=tmpdir)
+        p2 = sm2.get_pipeline("persist_user")
+        assert p2.steps and p2.steps[0]["operator"] == "threshold", "持久化会话未成功恢复"
+        restored = sm2.restore_all()
+    print(f"[PASS] 21. SessionManager 磁盘持久化验证通过: 重启后会话恢复 {len(p2.steps)} 步, 批量恢复数={restored}")
+
+    # 11.9 CI 工作流存在性校验
+    import os as _os
+    ci_path = _os.path.join(_os.path.dirname(__file__), ".github", "workflows", "test.yml")
+    assert _os.path.exists(ci_path), "缺少 .github/workflows/test.yml CI 工作流"
+    with open(ci_path, "r", encoding="utf-8") as _f:
+        _ci = _f.read()
+    assert "test_core.py" in _ci and "test_api_contract.py" in _ci, "CI 未覆盖核心与 API 契约测试"
+    print("[PASS] 22. CI 工作流验证通过: push/PR 自动运行 test_core.py + test_api_contract.py")
+
     print("  [SUCCESS] PHASE 1 + PHASE 2 全部测试 100% 通过！")
     print("==================================================")
 

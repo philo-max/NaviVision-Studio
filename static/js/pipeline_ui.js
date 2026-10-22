@@ -65,7 +65,14 @@ class PipelineUI {
         'morphology': '🔬',
         'filter': '🧹',
         'edges_subpix': '〰️',
-        'measure_region': '📐'
+        'measure_region': '📐',
+        'rgb_to_hsv': '🌈',
+        'hsv_threshold': '🎨',
+        'find_shape_model': '🧭',
+        'gen_contour_polygon': '🔷',
+        'read_barcode': '🔳',
+        'calibrate': '📏',
+        'read_text': '🔤'
       };
 
       const durationText = res ? `${res.duration_ms}ms` : '...';
@@ -363,6 +370,199 @@ class PipelineUI {
           </div>
         </div>
       `;
+    } else if (step.operator === 'find_shape_model') {
+      const minScore = p.min_score !== undefined ? p.min_score : 0.5;
+      const fsmScales = p.scales !== undefined ? p.scales : '1.0';
+      const fsmAngles = p.angles !== undefined ? p.angles : '0';
+      const maxMatches = p.max_matches || 10;
+      const nmsDist = p.nms_distance !== undefined ? p.nms_distance : 10;
+
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>最低匹配分数 (min_score)</span><span class="control-val" id="lblFsmScore">${minScore}</span></div>
+          <div class="slider-row">
+            <input type="range" id="sliderFsmScore" min="0.1" max="1" step="0.05" value="${minScore}">
+            <input type="number" id="numFsmScore" min="0" max="1" step="0.05" value="${minScore}">
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>多尺度列表 (逗号分隔)</span></div>
+          <input type="text" id="txtFsmScales" value="${fsmScales}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>多角度列表 (度, 逗号分隔)</span></div>
+          <input type="text" id="txtFsmAngles" value="${fsmAngles}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>最大匹配数 (max_matches)</span></div>
+          <input type="number" id="numFsmMax" min="1" max="100" value="${maxMatches}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>NMS 抑制距离 (px)</span><span class="control-val" id="lblFsmNms">${nmsDist}</span></div>
+          <input type="range" id="sliderFsmNms" min="1" max="60" step="1" value="${nmsDist}">
+        </div>
+      `;
+    } else if (step.operator === 'reduce_domain') {
+      const roiType = p.roi_type || 'rect';
+      const fillVal = (p.fill_value !== undefined) ? p.fill_value : 0;
+      const geom = p.geometry ? JSON.stringify(p.geometry) : '';
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>ROI 形状 (roi_type)</span></div>
+          <input type="text" id="txtRoiType" value="${roiType}" placeholder="rect / circle / polygon" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>区域外填充值 (fill_value)</span></div>
+          <input type="number" id="numRoiFill" min="0" max="255" value="${fillVal}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>当前 ROI 几何 (视口绘制后自动填入)</span></div>
+          <input type="text" id="txtRoiGeom" value='${geom}' readonly style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-muted);border-radius:4px;font-size:11px;">
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">提示: 点击视口工具栏的「矩形 / 圆 / 多边形」按钮在图像上绘制 ROI（多边形需双击或按 Enter 闭合）。</div>
+      `;
+    } else if (step.operator === 'measure_pos') {
+      const mx0 = (p.x0 !== undefined) ? p.x0 : 0;
+      const my0 = (p.y0 !== undefined) ? p.y0 : 0;
+      const mx1 = (p.x1 !== undefined) ? p.x1 : 100;
+      const my1 = (p.y1 !== undefined) ? p.y1 : 0;
+      const mSig = (p.sigma !== undefined) ? p.sigma : 1.0;
+      const mThr = (p.threshold !== undefined) ? p.threshold : 20;
+      const mSel = p.select || 'all';
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>测量线起点 X0 / Y0</span></div>
+          <div class="slider-row">
+            <input type="number" id="numMpX0" value="${mx0}" style="width:50%;padding:6px;">
+            <input type="number" id="numMpY0" value="${my0}" style="width:50%;padding:6px;">
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>测量线终点 X1 / Y1</span></div>
+          <div class="slider-row">
+            <input type="number" id="numMpX1" value="${mx1}" style="width:50%;padding:6px;">
+            <input type="number" id="numMpY1" value="${my1}" style="width:50%;padding:6px;">
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>高斯平滑 sigma</span><span class="control-val" id="lblMpSig">${mSig}</span></div>
+          <input type="range" id="sliderMpSig" min="0" max="10" step="0.5" value="${mSig}">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>边缘阈值 threshold</span><span class="control-val" id="lblMpThr">${mThr}</span></div>
+          <input type="range" id="sliderMpThr" min="0" max="100" step="1" value="${mThr}">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>边缘选择 (select)</span></div>
+          <select id="selMpSel" style="width:100%;padding:6px;">
+            <option value="all" ${mSel === 'all' ? 'selected' : ''}>all</option>
+            <option value="first" ${mSel === 'first' ? 'selected' : ''}>first</option>
+            <option value="last" ${mSel === 'last' ? 'selected' : ''}>last</option>
+          </select>
+        </div>
+      `;
+    } else if (step.operator === 'merge_images') {
+      const mmode = p.mode || 'blend';
+      const malpha = (p.alpha !== undefined) ? p.alpha : 0.5;
+      const minputFrom = p.input_from || '';
+      const modes = ['blend', 'add', 'max', 'min', 'absdiff', 'stack_h', 'stack_v'];
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>支路来源 (input_from)</span></div>
+          <input type="text" id="txtMergeFrom" value="${minputFrom}" placeholder="上游步骤 ID" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>合并模式 (mode)</span></div>
+          <select id="selMergeMode" style="width:100%;padding:6px;">
+            ${modes.map(m => `<option value="${m}" ${m === mmode ? 'selected' : ''}>${m}</option>`).join('')}
+          </select>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>混合系数 alpha</span><span class="control-val" id="lblMergeAlpha">${malpha}</span></div>
+          <input type="range" id="sliderMergeAlpha" min="0" max="1" step="0.05" value="${malpha}">
+        </div>
+      `;
+    } else if (step.operator === 'onnx_inference') {
+      const mPath = p.model_path || '';
+      const mTask = p.task || 'classification';
+      const mTopk = (p.top_k !== undefined) ? p.top_k : 5;
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>ONNX 模型路径 (model_path)</span></div>
+          <input type="text" id="txtOnnxPath" value="${mPath}" placeholder="/path/to/model.onnx" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>任务类型 (task)</span></div>
+          <select id="selOnnxTask" style="width:100%;padding:6px;">
+            <option value="classification" ${mTask === 'classification' ? 'selected' : ''}>classification</option>
+            <option value="generic" ${mTask === 'generic' ? 'selected' : ''}>generic</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>Top-K</span></div>
+          <input type="number" id="numOnnxTopk" min="1" max="20" value="${mTopk}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">需安装可选依赖 onnxruntime；未安装时将优雅降级并在结果中给出提示。</div>
+      `;
+    } else if (step.operator === 'hsv_threshold') {
+      const hv = (k, d) => (p[k] !== undefined ? p[k] : d);
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>色相 H 范围 (0-179)</span></div>
+          <div class="slider-row">
+            <input type="number" id="numHMin" min="0" max="179" value="${hv('h_min', 0)}" style="width:48%;">
+            <input type="number" id="numHMax" min="0" max="179" value="${hv('h_max', 179)}" style="width:48%;">
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>饱和度 S 范围 (0-255)</span></div>
+          <div class="slider-row">
+            <input type="number" id="numSMin" min="0" max="255" value="${hv('s_min', 0)}" style="width:48%;">
+            <input type="number" id="numSMax" min="0" max="255" value="${hv('s_max', 255)}" style="width:48%;">
+          </div>
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>明度 V 范围 (0-255)</span></div>
+          <div class="slider-row">
+            <input type="number" id="numVMin" min="0" max="255" value="${hv('v_min', 0)}" style="width:48%;">
+            <input type="number" id="numVMax" min="0" max="255" value="${hv('v_max', 255)}" style="width:48%;">
+          </div>
+        </div>
+      `;
+    } else if (step.operator === 'gen_contour_polygon') {
+      const eps = p.epsilon !== undefined ? p.epsilon : 2.0;
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>近似精度 epsilon (px)</span><span class="control-val" id="lblPolyEps">${eps}</span></div>
+          <div class="slider-row">
+            <input type="range" id="sliderPolyEps" min="0.5" max="20" step="0.5" value="${eps}">
+            <input type="number" id="numPolyEps" min="0.1" max="50" step="0.1" value="${eps}">
+          </div>
+        </div>
+      `;
+    } else if (step.operator === 'calibrate') {
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>棋盘格列数 (pattern_cols)</span></div>
+          <input type="number" id="numCalCols" min="2" max="30" value="${p.pattern_cols || 9}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>棋盘格行数 (pattern_rows)</span></div>
+          <input type="number" id="numCalRows" min="2" max="30" value="${p.pattern_rows || 6}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+        <div class="control-group">
+          <div class="control-label"><span>单格物理尺寸 (square_size)</span></div>
+          <input type="number" id="numCalSquare" min="0.01" max="1000" step="0.01" value="${p.square_size || 1.0}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+        </div>
+      `;
+    } else if (step.operator === 'read_text') {
+      html += `
+        <div class="control-group">
+          <div class="control-label"><span>OCR 语言包 (lang)</span></div>
+          <input type="text" id="txtOcrLang" value="${p.lang || 'eng'}" style="width:100%;padding:6px;background:var(--bg-input);border:1px solid var(--border-bright);color:var(--text-main);border-radius:4px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">可选依赖: 需安装 pytesseract 才能实际识别</div>
+        </div>
+      `;
     } else {
       html += `
         <div class="control-group">
@@ -582,6 +782,76 @@ class PipelineUI {
         nH.value = lH.textContent = p.high_threshold;
         this.emitUpdateDebounced();
       });
+    } else if (step.operator === 'find_shape_model') {
+      const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+      bind('sliderFsmScore', 'input', (e) => {
+        p.min_score = parseFloat(e.target.value);
+        document.getElementById('numFsmScore').value = p.min_score;
+        document.getElementById('lblFsmScore').textContent = p.min_score;
+        this.emitUpdateDebounced();
+      });
+      bind('numFsmScore', 'change', (e) => {
+        p.min_score = parseFloat(e.target.value);
+        document.getElementById('sliderFsmScore').value = p.min_score;
+        document.getElementById('lblFsmScore').textContent = p.min_score;
+        this.emitUpdateDebounced();
+      });
+      bind('txtFsmScales', 'change', (e) => { p.scales = e.target.value; this.emitUpdateDebounced(); });
+      bind('txtFsmAngles', 'change', (e) => { p.angles = e.target.value; this.emitUpdateDebounced(); });
+      bind('numFsmMax', 'change', (e) => { p.max_matches = parseInt(e.target.value); this.emitUpdateDebounced(); });
+      bind('sliderFsmNms', 'input', (e) => {
+        p.nms_distance = parseFloat(e.target.value);
+        document.getElementById('lblFsmNms').textContent = p.nms_distance;
+        this.emitUpdateDebounced();
+      });
+    } else if (step.operator === 'reduce_domain') {
+      const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+      bind('txtRoiType', 'change', (e) => { p.roi_type = e.target.value; this.emitUpdateDebounced(); });
+      bind('numRoiFill', 'change', (e) => { p.fill_value = parseInt(e.target.value); this.emitUpdateDebounced(); });
+    } else if (step.operator === 'measure_pos') {
+      const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+      ['numMpX0:numMpX0:x0', 'numMpY0:numMpY0:y0', 'numMpX1:numMpX1:x1', 'numMpY1:numMpY1:y1'].forEach(spec => {
+        const [el, key0, pkey] = [spec.split(':')[0], spec.split(':')[1], spec.split(':')[2]];
+        bind(el, 'change', (e) => { p[pkey] = parseFloat(e.target.value); this.emitUpdateDebounced(); });
+      });
+      bind('sliderMpSig', 'input', (e) => { p.sigma = parseFloat(e.target.value); document.getElementById('lblMpSig').textContent = p.sigma; this.emitUpdateDebounced(); });
+      bind('sliderMpThr', 'input', (e) => { p.threshold = parseFloat(e.target.value); document.getElementById('lblMpThr').textContent = p.threshold; this.emitUpdateDebounced(); });
+      bind('selMpSel', 'change', (e) => { p.select = e.target.value; this.emitUpdateDebounced(); });
+    } else if (step.operator === 'merge_images') {
+      const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+      bind('txtMergeFrom', 'change', (e) => { p.input_from = e.target.value; this.emitUpdateDebounced(); });
+      bind('selMergeMode', 'change', (e) => { p.mode = e.target.value; this.emitUpdateDebounced(); });
+      bind('sliderMergeAlpha', 'input', (e) => { p.alpha = parseFloat(e.target.value); document.getElementById('lblMergeAlpha').textContent = p.alpha; this.emitUpdateDebounced(); });
+    } else if (step.operator === 'onnx_inference') {
+      const bind = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+      bind('txtOnnxPath', 'change', (e) => { p.model_path = e.target.value; this.emitUpdateDebounced(); });
+      bind('selOnnxTask', 'change', (e) => { p.task = e.target.value; this.emitUpdateDebounced(); });
+      bind('numOnnxTopk', 'change', (e) => { p.top_k = parseInt(e.target.value); this.emitUpdateDebounced(); });
+    } else if (step.operator === 'hsv_threshold') {
+      const bindNum = (id, key) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', (e) => { p[key] = parseInt(e.target.value); this.emitUpdateDebounced(); });
+      };
+      bindNum('numHMin', 'h_min'); bindNum('numHMax', 'h_max');
+      bindNum('numSMin', 's_min'); bindNum('numSMax', 's_max');
+      bindNum('numVMin', 'v_min'); bindNum('numVMax', 'v_max');
+    } else if (step.operator === 'gen_contour_polygon') {
+      const sP = document.getElementById('sliderPolyEps');
+      const nP = document.getElementById('numPolyEps');
+      const lP = document.getElementById('lblPolyEps');
+      if (sP) sP.addEventListener('input', (e) => { p.epsilon = parseFloat(e.target.value); nP.value = p.epsilon; lP.textContent = p.epsilon; this.emitUpdateDebounced(); });
+      if (nP) nP.addEventListener('change', (e) => { p.epsilon = parseFloat(e.target.value); sP.value = p.epsilon; lP.textContent = p.epsilon; this.emitUpdateDebounced(); });
+    } else if (step.operator === 'calibrate') {
+      const cb = (id, key, isInt) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', (e) => { p[key] = isInt ? parseInt(e.target.value) : parseFloat(e.target.value); this.emitUpdateDebounced(); });
+      };
+      cb('numCalCols', 'pattern_cols', true);
+      cb('numCalRows', 'pattern_rows', true);
+      cb('numCalSquare', 'square_size', false);
+    } else if (step.operator === 'read_text') {
+      const elL = document.getElementById('txtOcrLang');
+      if (elL) elL.addEventListener('change', (e) => { p.lang = e.target.value; this.emitUpdateDebounced(); });
     }
   }
 
@@ -595,6 +865,17 @@ class PipelineUI {
       'morphology': { op_type: 'opening', kernel_shape: 'circle', kernel_size: 5 },
       'filter': { filter_type: 'gaussian', kernel_size: 5, sigma: 1.5 },
       'edges_subpix': { low_threshold: 40, high_threshold: 100 },
+      'rgb_to_hsv': {},
+      'hsv_threshold': { h_min: 0, h_max: 179, s_min: 0, s_max: 255, v_min: 0, v_max: 255 },
+      'find_shape_model': { min_score: 0.5, scales: '1.0', angles: '', max_matches: 10, nms_distance: 10, pyramid_levels: 3, subpixel: true, polarity_invariant: false },
+      'reduce_domain': { roi_type: 'rect', fill_value: 0 },
+      'measure_pos': { x0: 0, y0: 0, x1: 100, y1: 0, sigma: 1.0, threshold: 20, select: 'all' },
+      'merge_images': { input_from: '', mode: 'blend', alpha: 0.5 },
+      'onnx_inference': { model_path: '', task: 'classification', top_k: 5 },
+      'gen_contour_polygon': { epsilon: 2.0 },
+      'read_barcode': {},
+      'calibrate': { pattern_cols: 9, pattern_rows: 6, square_size: 1.0 },
+      'read_text': { lang: 'eng' },
       'measure_region': {}
     };
 

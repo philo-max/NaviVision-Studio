@@ -4,64 +4,90 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NaviVision Studio (OpenDevelop) —— 交互式机器视觉平台</title>
-  <link rel="stylesheet" href="/static/css/theme.css">
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
+  <link rel="stylesheet" href="/static/css/theme.css?v=20260921_dark">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261021_hl">
 </head>
 <body>
+
+  <!-- Icon Sprite -->
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h4a2 2 0 0 1 2 2v7"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m21 15-4.5-4.5L6 21"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 7 5 5-5 5M12 17h8"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.5 6.6A17 17 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 4.4-1"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></symbol>
+  </svg>
 
   <!-- Top App Header -->
   <header class="app-header">
     <div class="brand-section">
       <span class="logo-badge">NAVI-CV</span>
       <h1 class="app-title">
-        NaviVision Studio <span class="subtitle">OpenDevelop v1.1</span>
+        <span class="app-title-text">NaviVision Studio</span>
+        <span class="subtitle">v1.1</span>
       </h1>
     </div>
 
-    <!-- 模式切换: 算子模式 vs 代码模式 -->
     <div class="mode-switch-group">
-      <button class="mode-btn active" id="btnModePipeline">
-        <span>🧩</span> 可视化流水线
+      <button class="mode-btn active" id="btnModePipeline" title="可视化流水线">
+        <svg class="icon"><use href="#i-flow"/></svg><span class="btn-label">可视化流水线</span>
       </button>
-      <button class="mode-btn" id="btnModeCode">
-        <span>💻</span> Python 脚本模式
+      <button class="mode-btn" id="btnModeCode" title="代码工作台 (HDevelop / Python)">
+        <svg class="icon"><use href="#i-code"/></svg><span class="btn-label">代码工作台</span>
+      </button>
+      <button class="btn btn-sm btn-run-prominent" id="btnTopRunScript" style="display:none;margin-left:6px;" title="执行当前代码 (快捷键: Ctrl+Enter)">
+        <svg class="icon"><use href="#i-play"/></svg><span>▶ 运行脚本 (Ctrl+Enter)</span>
       </button>
     </div>
 
     <div class="header-center">
-      <div class="sample-selector">
-        <span>🏭 案例:</span>
-        <select id="sampleSelect">
-          <option value="pills">载入中...</option>
-        </select>
-      </div>
-      <input type="file" id="uploadInput" accept="image/*" style="display:none;">
+      <input type="file" id="uploadInput" accept="image/*" hidden>
+      <input type="file" id="projectFileInput" accept=".nvproj,.json" hidden>
+      <input type="file" id="hdevFileInput" accept=".hdev,.hdvp" hidden>
+      <input type="file" id="batchInput" accept="image/*" multiple hidden>
+
       <button class="btn btn-secondary" id="btnUpload" title="载入本地工业相机照片或测试图">
-        📁 打开图片
+        <svg class="icon"><use href="#i-image"/></svg><span class="btn-label">打开图片</span>
       </button>
       <button class="btn btn-secondary" id="btnSaveProject" title="导出保存为 .nvproj 视觉工程文件">
-        💾 保存工程
+        <svg class="icon"><use href="#i-save"/></svg><span class="btn-label">保存工程</span>
       </button>
       <button class="btn btn-secondary" id="btnOpenProject" title="打开并恢复 .nvproj 视觉工程文件">
-        📂 打开工程
+        <svg class="icon"><use href="#i-folder"/></svg><span class="btn-label">打开工程</span>
       </button>
-      <input type="file" id="projectFileInput" accept=".nvproj,.json" style="display:none;">
-      <input type="file" id="batchInput" accept="image/*" multiple style="display:none;">
+      <button class="btn btn-secondary" id="btnUploadHdev" title="导入本地 HDevelop (.hdev / .hdvp) 脚本">
+        <svg class="icon"><use href="#i-code"/></svg><span class="btn-label">导入 .hdev</span>
+      </button>
       <button class="btn btn-primary" id="btnBatchInspect" title="按当前流水线批量检测，并导出判定报告">
-        🏭 批量检测
+        <svg class="icon"><use href="#i-layers"/></svg><span class="btn-label">批量检测</span>
       </button>
     </div>
 
     <div class="header-actions">
       <div class="badge-metric" title="计算引擎响应延迟">
-        <span>⚡ 延迟:</span>
+        <svg class="icon"><use href="#i-bolt"/></svg>
         <span id="hudLatency">0ms</span>
       </div>
       <button class="btn btn-secondary" id="btnOpenApiHub" title="查看对外开放的工业 REST API 与客户端调用代码">
-        🌐 开放 API
+        <svg class="icon"><use href="#i-globe"/></svg><span class="btn-label">开放 API</span>
       </button>
-      <button class="btn btn-accent" id="btnExportCode" title="生成并导出工业级 Python / OpenCV 脚本">
-        🚀 导出 Python 代码
+      <button class="btn btn-accent" id="btnExportCode" title="生成并导出工业级 Python / HDevelop 脚本">
+        <svg class="icon"><use href="#i-code"/></svg><span class="btn-label">导出脚本</span>
       </button>
     </div>
   </header>
@@ -72,40 +98,36 @@
     <!-- 1A. Left Column: Operator Pipeline (HDevelop Program Window) -->
     <aside class="panel-pipeline" id="panelPipeline">
       <div class="panel-header">
-        <h3>📋 算子流水线 <span class="step-count" id="stepCountBadge">0 算子</span></h3>
-        <div style="position:relative;">
-          <button class="btn btn-primary" id="btnAddOp" style="padding:4px 10px;font-size:12px;">
-            + 添加算子
+        <div class="panel-title-block">
+          <h3><svg class="icon"><use href="#i-flow"/></svg>算子流水线 <span class="step-count" id="stepCountBadge">0 算子</span></h3>
+          <span class="panel-tag">PIPELINE / OPERATORS</span>
+        </div>
+        <div class="dropdown-anchor">
+          <button class="btn btn-primary btn-sm" id="btnAddOp">
+            <svg class="icon"><use href="#i-plus"/></svg>添加算子
           </button>
           <!-- 下拉算子菜单 -->
-          <div id="addOpMenu" style="display:none;position:absolute;top:32px;right:0;width:180px;background:var(--bg-panel-elevated);border:1px solid var(--border-bright);border-radius:var(--radius-md);box-shadow:var(--shadow-dropdown);z-index:100;padding:6px 0;">
-            <button class="dropdown-item" data-op="threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🎚️</span> threshold (双阈值)
-            </button>
-            <button class="dropdown-item" data-op="auto_threshold" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🪄</span> auto_threshold (Otsu)
-            </button>
-            <button class="dropdown-item" data-op="connection" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🧩</span> connection (打散连通)
-            </button>
-            <button class="dropdown-item" data-op="select_shape" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🎯</span> select_shape (特征筛选)
-            </button>
-            <button class="dropdown-item" data-op="morphology" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🔬</span> morphology (形态学)
-            </button>
-            <button class="dropdown-item" data-op="filter" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🧹</span> filter (平滑滤波)
-            </button>
-            <button class="dropdown-item" data-op="edges_subpix" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>〰️</span> edges_subpix (亚像素边缘)
-            </button>
-            <button class="dropdown-item" data-op="measure_region" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>📐</span> measure_region (几何特征度量)
-            </button>
-            <button class="dropdown-item" data-op="rgb1_to_gray" style="width:100%;text-align:left;padding:8px 12px;background:transparent;border:none;color:var(--text-main);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
-              <span>🌓</span> rgb1_to_gray (灰度化)
-            </button>
+          <div id="addOpMenu" class="dropdown-menu">
+            <button class="dropdown-item" data-op="reduce_domain">reduce_domain (ROI 归约)</button>
+            <button class="dropdown-item" data-op="measure_pos">measure_pos (1D 卡尺)</button>
+            <button class="dropdown-item" data-op="merge_images">merge_images (多图合并)</button>
+            <button class="dropdown-item" data-op="onnx_inference">onnx_inference (深度学习)</button>
+            <button class="dropdown-item" data-op="threshold">threshold (双阈值)</button>
+            <button class="dropdown-item" data-op="auto_threshold">auto_threshold (Otsu)</button>
+            <button class="dropdown-item" data-op="connection">connection (打散连通)</button>
+            <button class="dropdown-item" data-op="select_shape">select_shape (特征筛选)</button>
+            <button class="dropdown-item" data-op="morphology">morphology (形态学)</button>
+            <button class="dropdown-item" data-op="filter">filter (平滑滤波)</button>
+            <button class="dropdown-item" data-op="rgb_to_hsv">rgb_to_hsv (HSV色彩转换)</button>
+            <button class="dropdown-item" data-op="hsv_threshold">hsv_threshold (彩色阈值)</button>
+            <button class="dropdown-item" data-op="find_shape_model">find_shape_model (模板匹配)</button>
+            <button class="dropdown-item" data-op="gen_contour_polygon">gen_contour_polygon (折线多边形)</button>
+            <button class="dropdown-item" data-op="read_barcode">read_barcode (条码/二维码)</button>
+            <button class="dropdown-item" data-op="calibrate">calibrate (相机标定)</button>
+            <button class="dropdown-item" data-op="read_text">read_text (OCR识别)</button>
+            <button class="dropdown-item" data-op="edges_subpix">edges_subpix (真亚像素边缘)</button>
+            <button class="dropdown-item" data-op="measure_region">measure_region (几何特征度量)</button>
+            <button class="dropdown-item" data-op="rgb1_to_gray">rgb1_to_gray (灰度化)</button>
           </div>
         </div>
       </div>
@@ -119,34 +141,99 @@
     <!-- 1B. Left Column (Alternative): Live Code Studio Panel (敲代码模式) -->
     <aside class="panel-code-studio" id="panelCodeStudio" style="display:none;">
       <div class="code-studio-toolbar">
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:12px;color:var(--text-muted);">模板:</span>
-          <select id="codeTemplateSelect" style="background:var(--bg-input);color:var(--text-main);border:1px solid var(--border-bright);padding:3px 6px;border-radius:4px;font-size:12px;outline:none;cursor:pointer;">
-            <option value="sobel">Sobel 梯度自定二值化</option>
-            <option value="contours">Canny 矢量轮廓提取</option>
-            <option value="ai_yolo">调用工业 YOLO AI 检测服务</option>
-            <option value="ollama_vlm">接入本地 Ollama 多模态大模型</option>
-          </select>
+        <div class="code-studio-toolbar-row">
+          <label class="field-inline">
+            <span class="field-label" style="font-weight:600;color:var(--text-main);">语言:</span>
+            <select id="codeLangSelect" class="select-sm">
+              <option value="hdev" selected>🔶 HDevelop 4GL</option>
+              <option value="python">🐍 Python / OpenCV</option>
+            </select>
+          </label>
+          <button class="btn btn-secondary btn-sm" id="btnOpenManual" title="查阅全量 HDevelop 4GL 视觉算法算子命令手册">
+            <svg class="icon"><use href="#i-book"/></svg><span>📖 算法命令手册</span>
+          </button>
         </div>
-        <button class="btn btn-primary" id="btnRunScript" style="padding:4px 10px;font-size:12px;">
-          ▶ 运行 (Ctrl+Enter)
-        </button>
+        <div class="code-studio-toolbar-row">
+          <button class="btn btn-secondary btn-sm" id="btnSyncToPipeline" title="将当前 HDevelop 脚本转译并同步到可视化流水线">
+            <svg class="icon"><use href="#i-sync"/></svg>转为流水线
+          </button>
+          <button class="btn btn-sm btn-run-prominent" id="btnRunScript" title="快捷键: Ctrl + Enter">
+            <svg class="icon"><use href="#i-play"/></svg>▶ 运行脚本 (Ctrl+Enter)
+          </button>
+        </div>
+        <div class="code-studio-toolbar-row" id="debugToolbarRow">
+          <button class="btn btn-secondary btn-sm" id="btnDebugStart" title="解析脚本并暂停在第一条指令之前, 点击行号可切换断点">
+            🐞 开始调试
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnDebugStep" title="单步执行下一条指令" disabled>
+            ⏭ 单步
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnDebugContinue" title="持续执行直到命中断点或脚本结束" disabled>
+            ⏩ 继续
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnDebugStop" title="终止当前调试会话" disabled>
+            ⏹ 停止
+          </button>
+          <span id="debugStatusLabel" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
+        </div>
+      </div>
+
+      <!-- HDevelop 多图形窗口切换 (仅当脚本打开了多个窗口时显示) -->
+      <div id="hdevWindowBar" style="display:none;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-panel-elevated);border-bottom:1px solid var(--border-subtle);font-size:11px;">
+        <span style="color:var(--text-muted);white-space:nowrap;font-weight:600;">🪟 图形窗口:</span>
+        <div id="hdevWindowPills" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
+      </div>
+
+      <!-- 单步调试变量监视器 (仅调试会话激活时显示) -->
+      <div id="debugWatchPanel" class="debug-watch-panel" style="display:none;">
+        <div class="debug-watch-header">🔍 变量监视器 <span id="debugWatchHint" style="font-weight:normal;color:var(--text-muted);"></span></div>
+        <table class="debug-watch-table">
+          <thead><tr><th>Control 变量</th><th>当前值</th></tr></thead>
+          <tbody id="debugWatchBody">
+            <tr><td colspan="2" style="color:var(--text-muted);font-style:italic;">尚未开始调试</td></tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- 代码输入区与行号 -->
       <div class="editor-wrapper">
         <div class="line-numbers-gutter" id="editorLineNumbers">1</div>
-        <textarea class="script-editor-textarea" id="scriptEditor" spellcheck="false"></textarea>
+        <div class="editor-stack">
+          <pre class="script-editor-highlight" id="editorHighlight" aria-hidden="true"></pre>
+          <textarea class="script-editor-textarea" id="scriptEditor" spellcheck="false"></textarea>
+        </div>
+      </div>
+
+      <!-- HDevelop 变量窗口: Iconic 变量缩略图卡片, 点击即在图形窗口显示 -->
+      <div class="var-window" id="hdevVarBar">
+        <div class="var-window-header">
+          <span>🖼️ 图像变量</span>
+          <span class="var-window-count" id="hdevVarCount"></span>
+        </div>
+        <div class="var-window-cards" id="hdevVarPills">
+          <span class="var-window-empty">运行后在此显示图像、区域等变量</span>
+        </div>
+        <div class="var-window-header">
+          <span>🔢 控制变量</span>
+          <span class="var-window-count" id="hdevCtrlCount"></span>
+        </div>
+        <div class="ctrl-var-scroll">
+          <table class="ctrl-var-table">
+            <tbody id="hdevCtrlBody">
+              <tr><td class="ctrl-var-empty" colspan="2">运行后在此显示 Width、Area、Score 等数值变量</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- 黑客沙箱终端输出 -->
       <div class="terminal-panel">
         <div class="terminal-header">
-          <span>🖥️ Python 沙箱终端控制台 (stdout/stderr)</span>
-          <button class="icon-btn" id="btnClearTerminal" title="清空日志" style="font-size:11px;">🗑️ 清屏</button>
+          <span class="terminal-title" id="terminalTitle"><svg class="icon"><use href="#i-terminal"/></svg>HDevelop 4GL 解释执行沙箱控制台</span>
+          <button class="icon-btn" id="btnClearTerminal" title="清空日志"><svg class="icon"><use href="#i-trash"/></svg>清屏</button>
         </div>
         <div class="terminal-logs" id="terminalLogs">
-          <div class="console-entry meta">[系统就绪] Python 3.12 沙箱环境加载完毕，随时按 Ctrl+Enter 运行代码...</div>
+          <div class="console-entry meta">[系统就绪] HDevelop 4GL 解释器已就绪，随时按 Ctrl+Enter 运行脚本...</div>
         </div>
       </div>
     </aside>
@@ -165,10 +252,17 @@
           <input type="range" id="rangeOpacity" min="0" max="100" value="65">
         </div>
         <div class="sep"></div>
-        <button class="icon-btn" id="btnZoomIn" title="放大 (+)">🔍+</button>
-        <button class="icon-btn" id="btnZoomOut" title="缩小 (-)">🔍-</button>
-        <button class="icon-btn" id="btnZoomFit" title="自适应窗口">⛶ 适配</button>
+        <button class="icon-btn" id="btnZoomIn" title="放大 (+)">+</button>
+        <button class="icon-btn" id="btnZoomOut" title="缩小 (-)">&minus;</button>
+        <button class="icon-btn" id="btnZoomFit" title="自适应窗口">适配</button>
         <button class="icon-btn" id="btnZoom100" title="100% 原尺寸">1:1</button>
+        <div class="sep"></div>
+        <button class="icon-btn" id="btnRoiRect" title="绘制矩形 ROI">▭ 矩形</button>
+        <button class="icon-btn" id="btnRoiCircle" title="绘制圆形 ROI">◯ 圆</button>
+        <button class="icon-btn" id="btnRoiPoly" title="绘制多边形 ROI">⬠ 多边形</button>
+        <button class="icon-btn" id="btnRoiClear" title="清除 ROI">✖ 清除ROI</button>
+        <div class="sep"></div>
+        <button class="icon-btn" id="btnToggleCompare" title="并排显示处理前/处理后的图像">🔀 前后对比</button>
       </div>
 
       <!-- 画布舞台 -->
@@ -176,24 +270,70 @@
         <canvas id="imageCanvas" class="canvas-layer"></canvas>
         <canvas id="maskCanvas" class="canvas-layer"></canvas>
         <canvas id="vectorCanvas" class="canvas-layer"></canvas>
+        <div class="compare-view" id="compareView" hidden>
+          <div class="compare-pane">
+            <span class="compare-pane-label">处理前 (Before)</span>
+            <img class="compare-pane-img" id="compareBeforeImg" alt="处理前">
+          </div>
+          <div class="compare-pane">
+            <span class="compare-pane-label">处理后 (After)</span>
+            <img class="compare-pane-img" id="compareAfterImg" alt="处理后">
+          </div>
+        </div>
+        <div class="empty-state" id="emptyState">
+          <svg class="icon empty-state-icon"><use href="#i-image"/></svg>
+          <h2 class="empty-state-title">尚未载入图像</h2>
+          <p class="empty-state-hint">打开一张图像，再从左侧「添加算子」搭建处理流水线或切换至「代码工作台」编写 HDevelop 脚本。</p>
+          <button class="btn btn-accent" id="btnEmptyOpen">
+            <svg class="icon"><use href="#i-image"/></svg>打开图片
+          </button>
+        </div>
+      </div>
+
+      <!-- 结果面板 (底部停靠): 目标特征表 / 识别结果 -->
+      <div class="results-dock" id="resultsDock">
+        <div class="dock-resizer" id="dockResizer" title="拖动调整高度"></div>
+        <div class="dock-header">
+          <div class="dock-tabs">
+            <button class="dock-tab active" data-pane="objects">目标特征表 <span class="dock-badge" id="dockObjCount">0</span></button>
+            <button class="dock-tab" data-pane="ocr">识别结果 <span class="dock-badge" id="dockOcrCount">0</span></button>
+          </div>
+          <div class="dock-summary" id="dockSummary"></div>
+          <div class="dock-actions">
+            <button class="icon-btn" id="btnDockExport" title="导出当前表格为 CSV">导出 CSV</button>
+            <button class="icon-btn" id="btnDockToggle" title="折叠结果面板">▾</button>
+          </div>
+        </div>
+        <div class="dock-body">
+          <div class="dock-pane" data-pane="objects">
+            <div class="table-scroll"><table class="result-table" id="objectResultTable"></table></div>
+          </div>
+          <div class="dock-pane" data-pane="ocr" hidden>
+            <div class="ocr-hero">
+              <div class="ocr-text" id="ocrText">—</div>
+              <div class="ocr-meta" id="ocrMeta">尚无识别结果</div>
+            </div>
+            <div class="table-scroll"><table class="result-table" id="ocrResultTable"></table></div>
+          </div>
+        </div>
       </div>
 
       <!-- 底部像素十字丝遥测 HUD -->
       <div class="viewport-hud">
         <div class="hud-item">
-          <span>📍 坐标:</span>
+          <span class="hud-label">坐标</span>
           <span class="hud-val" id="hudCoord">X: -, Y: -</span>
         </div>
         <div class="hud-item">
-          <span>🎨 像素:</span>
+          <span class="hud-label">像素</span>
           <span class="hud-val" id="hudPixel">RGB: (-, -, -) | Gray: -</span>
         </div>
         <div class="hud-item">
-          <span>🛡️ 区域:</span>
+          <span class="hud-label">区域</span>
           <span class="hud-val" id="hudRegion">--</span>
         </div>
         <div class="hud-item">
-          <span>🔍 缩放:</span>
+          <span class="hud-label">缩放</span>
           <span class="hud-val" id="hudZoom">100%</span>
         </div>
       </div>
@@ -201,82 +341,60 @@
 
     <!-- 3. Right Column: Inspector & Histogram (HDevelop Operator Window) -->
     <aside class="panel-inspector">
-      <div class="inspector-tabs">
-        <button class="tab-btn active" data-tab="inspector">⚙️ 算子调谐</button>
-        <button class="tab-btn" data-tab="objects">📊 目标数据 <span id="tabObjCount">(0)</span></button>
-      </div>
+      <div class="inspector-title">算子调谐</div>
 
       <!-- Tab 1: 算子参数表单 -->
-      <div class="inspector-content" id="tabInspector">
+      <div class="inspector-content" id="tabInspector" style="display:flex;">
         <div id="inspectorContent">
           <!-- 由 pipeline_ui.js 动态填充 -->
-        </div>
-      </div>
-
-      <!-- Tab 2: 连通域目标特征表格 -->
-      <div class="inspector-content" id="tabObjects" style="display:none;">
-        <div style="overflow-x:auto;">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>面积 (px)</th>
-                <th>圆度 (0~1)</th>
-                <th>质心 (Y, X)</th>
-                <th>外接框 [Y1,X1,Y2,X2]</th>
-              </tr>
-            </thead>
-            <tbody id="objectTableBody">
-              <!-- 由 app.js 动态填充 -->
-            </tbody>
-          </table>
         </div>
       </div>
     </aside>
 
   </main>
 
-  <!-- 模态框 1: Code Exporter Modal (一键生成 Python 独立脚本) -->
+  <!-- 模态框 1: Code Exporter Modal (一键生成 Python / HDevelop 独立脚本) -->
   <div class="modal-backdrop" id="codeModal">
     <div class="modal-card">
       <div class="modal-header">
         <h3 class="modal-title">
-          <span>🚀</span> 工业级 Python (OpenCV) 代码已就绪
+          <svg class="icon"><use href="#i-code"/></svg>视觉代码已就绪
         </h3>
-        <button class="icon-btn" id="btnCloseModal" style="font-size:16px;">✕</button>
+        <button class="icon-btn" id="btnCloseModal" title="关闭"><svg class="icon"><use href="#i-close"/></svg></button>
       </div>
       <pre class="code-editor-area" id="codeViewer"></pre>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="btnCopyCode">📋 复制代码</button>
-        <button class="btn btn-primary" id="btnDownloadPy">💾 下载 .py 文件</button>
+        <button class="btn btn-secondary" id="btnCopyCode">复制代码</button>
+        <button class="btn btn-secondary" id="btnExportHdev">🔶 导出 .hdev 脚本</button>
+        <button class="btn btn-primary" id="btnDownloadPy"><svg class="icon"><use href="#i-download"/></svg>下载 .py 文件</button>
       </div>
     </div>
   </div>
 
   <!-- 模态框 2: API Integration Hub Modal (对外开放 REST API 接入文档) -->
   <div class="modal-backdrop" id="apiModal">
-    <div class="modal-card" style="width: 820px;">
+    <div class="modal-card modal-card-wide">
       <div class="modal-header">
         <h3 class="modal-title">
-          <span>🌐</span> 工业级 REST API 开放接入中心
+          <svg class="icon"><use href="#i-globe"/></svg>REST API 开放接入中心
         </h3>
-        <button class="icon-btn" id="btnCloseApiModal" style="font-size:16px;">✕</button>
+        <button class="icon-btn" id="btnCloseApiModal" title="关闭"><svg class="icon"><use href="#i-close"/></svg></button>
       </div>
-      <div style="padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;">
-        <div style="background:var(--bg-panel-elevated);padding:12px 14px;border-radius:6px;border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-body">
+        <div class="endpoint-bar">
           <div>
             <span class="api-method-badge">POST</span>
-            <code style="font-family:var(--font-mono);font-size:14px;color:var(--neon-cyan);margin-left:8px;">/api/v1/predict</code>
-            <span style="font-size:12px;color:var(--text-muted);margin-left:10px;">当前工作台调试流水线已直接映射为产线远程推理服务</span>
+            <code class="endpoint-path">/api/v1/predict</code>
+            <span class="endpoint-desc">当前工作台调试流水线已直接映射为产线远程推理服务</span>
           </div>
-          <a href="/docs" target="_blank" class="btn btn-secondary" style="font-size:11px;text-decoration:none;">
-            📖 打开 Swagger 互动文档 ↗
+          <a href="/docs" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+            <svg class="icon"><use href="#i-book"/></svg>Swagger 文档
           </a>
         </div>
 
         <div>
-          <h4 style="font-size:13px;color:var(--text-main);margin-bottom:6px;">1. Python 客户端远程调用代码 (工控机/外部服务)</h4>
-          <pre class="code-editor-area" style="height:150px;">import requests
+          <h4 class="section-title">1. Python 客户端远程调用代码 (工控机/外部服务)</h4>
+          <pre class="code-editor-area code-editor-area--md">import requests
 
 url = "http://127.0.0.1:8080/api/v1/predict"
 
@@ -293,8 +411,8 @@ for obj in result["objects"]:
         </div>
 
         <div>
-          <h4 style="font-size:13px;color:var(--text-main);margin-bottom:6px;">2. cURL 终端命令行指令</h4>
-          <pre class="code-editor-area" style="height:60px;">curl -X POST "http://127.0.0.1:8080/api/v1/predict" \
+          <h4 class="section-title">2. cURL 终端命令行指令</h4>
+          <pre class="code-editor-area code-editor-area--sm">curl -X POST "http://127.0.0.1:8080/api/v1/predict" \
      -F "file=@your_inspection_image.png"</pre>
         </div>
       </div>
@@ -304,11 +422,53 @@ for obj in result["objects"]:
     </div>
   </div>
 
+  <!-- 模态框 3: 算法命令手册 (Operator Reference Manual & Cheatsheet) -->
+  <div class="modal-backdrop" id="manualModal">
+    <div class="modal-card modal-card-manual">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          <svg class="icon"><use href="#i-book"/></svg>算法命令手册 (HDevelop 4GL / 机器视觉核心算子)
+        </h3>
+        <button class="icon-btn" id="btnCloseManualModal" title="关闭"><svg class="icon"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="manual-toolbar-box">
+        <div class="manual-search-wrapper">
+          <input type="text" id="manualSearchInput" class="input-search" placeholder="🔍 输入算子名称、中文功能或参数关键词进行实时过滤...">
+        </div>
+        <div class="manual-category-pills" id="manualCategoryPills">
+          <button class="cat-pill active" data-cat="all">全部算子</button>
+          <button class="cat-pill" data-cat="io">📷 图像与通道</button>
+          <button class="cat-pill" data-cat="threshold">⚡ 阈值与分割</button>
+          <button class="cat-pill" data-cat="morphology">🔬 形态学滤波</button>
+          <button class="cat-pill" data-cat="region">🧩 区域生成与运算</button>
+          <button class="cat-pill" data-cat="measure">📐 几何测量拟合</button>
+          <button class="cat-pill" data-cat="matching">🎯 形状匹配</button>
+          <button class="cat-pill" data-cat="affine">↗️ 仿射变换</button>
+          <button class="cat-pill" data-cat="ocr">🔤 字符识别</button>
+          <button class="cat-pill" data-cat="file">📁 文件与流程</button>
+          <button class="cat-pill" data-cat="xld">🔍 亚像素XLD</button>
+          <button class="cat-pill" data-cat="homography">🧭 投影单应性</button>
+          <button class="cat-pill" data-cat="display">🖥️ 视口与显示</button>
+        </div>
+      </div>
+      <div class="modal-body manual-modal-body" id="manualCardList">
+        <!-- 由 operator_manual.js 动态渲染 -->
+      </div>
+      <div class="modal-footer">
+        <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-dim);">💡 提示：点击算子卡片上的「➕ 插入到编辑器」可将语法片段写入当前代码光标位置</span>
+        <button class="btn btn-secondary" id="btnCloseManualModalBtn">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JavaScript Modules -->
-  <script src="/static/js/viewport.js"></script>
-  <script src="/static/js/histogram.js"></script>
-  <script src="/static/js/pipeline_ui.js"></script>
-  <script src="/static/js/code_editor.js"></script>
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/viewport.js?v=20261021_redraw"></script>
+  <script src="/static/js/histogram.js?v=20260921_run"></script>
+  <script src="/static/js/pipeline_ui.js?v=20260921_run"></script>
+  <script src="/static/js/syntax_highlight.js?v=20261021_hl"></script>
+  <script src="/static/js/code_editor.js?v=20261021_hl"></script>
+  <script src="/static/js/operator_manual.js?v=20261021_ocrops"></script>
+  <script src="/static/js/results_panel.js?v=20261002_dock"></script>
+  <script src="/static/js/app.js?v=20261014_shape"></script>
 </body>
 </html>

@@ -28,6 +28,11 @@ def generate_python_code(steps: List[Dict[str, Any]], image_path_placeholder: st
         "    ",
         "    h, w = image.shape[:2]",
         "    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image.copy()",
+        "    def _bilerp(im, px, py):",
+        "        x0 = int(min(max(px, 0), im.shape[1] - 1)); y0 = int(min(max(py, 0), im.shape[0] - 1))",
+        "        x1 = min(x0 + 1, im.shape[1] - 1); y1 = min(y0 + 1, im.shape[0] - 1)",
+        "        fx = px - x0; fy = py - y0",
+        "        return float(im[y0, x0] * (1 - fx) * (1 - fy) + im[y0, x1] * fx * (1 - fy) + im[y1, x0] * (1 - fx) * fy + im[y1, x1] * fx * fy)",
         "    current_mask = None",
         "    detected_objects = []",
         ""
@@ -124,6 +129,108 @@ def generate_python_code(steps: List[Dict[str, Any]], image_path_placeholder: st
             lines.append("    print(f'  [Filter] Applied " + f_type + " smoothing kernel=" + str(k_eff) + "')")
             lines.append("")
 
+        elif op == "rgb_to_hsv":
+            lines.append("    # 色彩空间转换 (HALCON: trans_from_rgb Rgb->Hsv)")
+            lines.append("    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)")
+            lines.append("")
+
+        elif op == "hsv_threshold":
+            h_min = int(p.get("h_min", 0)); h_max = int(p.get("h_max", 179))
+            s_min = int(p.get("s_min", 0)); s_max = int(p.get("s_max", 255))
+            v_min = int(p.get("v_min", 0)); v_max = int(p.get("v_max", 255))
+            lines.append("    # 彩色阈值分割 (HALCON: threshold in HSV space)")
+            lines.append("    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)")
+            lines.append(f"    current_mask = cv2.inRange(hsv, np.array([{h_min}, {s_min}, {v_min}]), np.array([{h_max}, {s_max}, {v_max}]))")
+            lines.append("    print(f'  [HsvThreshold] Matched pixels: {int(np.count_nonzero(current_mask))}')")
+            lines.append("")
+
+        elif op == "find_shape_model":
+            min_score = float(p.get("min_score", 0.5))
+            scales_raw = str(p.get("scales", "1.0"))
+            angles_raw = str(p.get("angles", "0;10;20;30;40;50;60;70;80;90"))
+            max_matches = int(p.get("max_matches", 10))
+            nms_dist = float(p.get("nms_distance", 10.0))
+            lines.append("    # 模板匹配 (多目标/多尺度/多角度 + 图像金字塔 + 相关峰亚像素)")
+            templ_path = str(p.get("template_path", "template.png"))
+            lines.append("    _tmpl_path = '" + templ_path + "'")
+            lines.append("    template = cv2.imread(_tmpl_path, cv2.IMREAD_GRAYSCALE)")
+            lines.append("    search_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image")
+            lines.append("    _matches = []")
+            lines.append("    if template is not None:")
+            lines.append(f"        for _s in [float(x) for x in '{scales_raw}'.replace(';', ',').split(',') if x.strip()]:")
+            lines.append(f"            for _a in [float(x) for x in '{angles_raw}'.replace(';', ',').split(',') if x.strip()]:")
+            lines.append("                _tw, _th = int(template.shape[1] * _s), int(template.shape[0] * _s)")
+            lines.append("                if _tw < 1 or _th < 1 or _tw >= search_gray.shape[1] or _th >= search_gray.shape[0]:")
+            lines.append("                    continue")
+            lines.append("                t = cv2.resize(template, (_tw, _th))")
+            lines.append("                if abs(_a) > 1e-6:")
+            lines.append("                    _diag = int((_tw ** 2 + _th ** 2) ** 0.5) + 2")
+            lines.append("                    _canvas = np.zeros((_diag, _diag), dtype=t.dtype)")
+            lines.append("                    _oy, _ox = (_diag - _th) // 2, (_diag - _tw) // 2")
+            lines.append("                    _canvas[_oy:_oy + _th, _ox:_ox + _tw] = t")
+            lines.append("                    _m = cv2.getRotationMatrix2D((_diag / 2.0, _diag / 2.0), _a, 1.0)")
+            lines.append("                    rot = cv2.warpAffine(_canvas, _m, (_diag, _diag))")
+            lines.append("                else:")
+            lines.append("                    rot = t")
+            lines.append("                if rot.shape[0] >= search_gray.shape[0] or rot.shape[1] >= search_gray.shape[1]:")
+            lines.append("                    continue")
+            lines.append("                res = cv2.matchTemplate(search_gray, rot, cv2.TM_CCOEFF_NORMED)")
+            lines.append("                _work = res.copy()")
+            lines.append(f"                for _ in range({max_matches}):")
+            lines.append("                    _, mv, _, ml = cv2.minMaxLoc(_work)")
+            lines.append(f"                    if mv < {min_score}:")
+            lines.append("                        break")
+            lines.append("                    _matches.append({'score': float(mv), 'x': int(ml[0]), 'y': int(ml[1]), 'angle': _a, 'scale': _s})")
+            lines.append(f"                    _x0, _y0 = max(0, ml[0] - {int(nms_dist)}), max(0, ml[1] - {int(nms_dist)})")
+            lines.append(f"                    _work[_y0:ml[1] + {int(nms_dist)} + 1, _x0:ml[0] + {int(nms_dist)} + 1] = -1.0")
+            lines.append("        print(f'  [ShapeModel] found {len(_matches)} match(es)')")
+            lines.append("        for _mt in _matches:")
+            lines.append("            cv2.rectangle(image, (_mt['x'], _mt['y']), (_mt['x'] + int(template.shape[1] * _mt['scale']), _mt['y'] + int(template.shape[0] * _mt['scale'])), (0, 215, 255), 1)")
+            lines.append("")
+
+        elif op == "gen_contour_polygon":
+            epsilon = float(p.get("epsilon", 2.0))
+            lines.append("    # 轮廓多边形近似 (HALCON: gen_polygons_xld / approx_chain)")
+            lines.append("    _cnts, _ = cv2.findContours(current_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)")
+            lines.append("    polygons = []")
+            lines.append("    for _c in _cnts:")
+            lines.append(f"        _approx = cv2.approxPolyDP(_c, {epsilon}, True)")
+            lines.append("        polygons.append(_approx.reshape(-1, 2).tolist())")
+            lines.append("    print(f'  [Polygon] Extracted {len(polygons)} approximated polygons')")
+            lines.append("")
+
+        elif op == "read_barcode":
+            lines.append("    # 条码/二维码识别 (HALCON: find_bar_code / find_data_code_2d)")
+            lines.append("    _gray_bc = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image")
+            lines.append("    _qr = cv2.QRCodeDetector()")
+            lines.append("    _data, _pts, _ = _qr.detectAndDecode(_gray_bc)")
+            lines.append("    if _data:")
+            lines.append("        print(f'  [Barcode] QR decoded: {_data}')")
+            lines.append("")
+
+        elif op == "calibrate":
+            cols = int(p.get("pattern_cols", 9)); rows = int(p.get("pattern_rows", 6))
+            square = float(p.get("square_size", 1.0))
+            lines.append("    # 相机标定: 棋盘格像素->物理尺寸换算系数")
+            lines.append("    _gray_cal = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image")
+            lines.append(f"    _found, _corners = cv2.findChessboardCorners(_gray_cal, ({cols}, {rows}))")
+            lines.append("    if _found:")
+            lines.append("        _pts = _corners.reshape(-1, 2)")
+            lines.append(f"        _ppu = float(np.linalg.norm(_pts[1] - _pts[0])) / {square}")
+            lines.append("        print(f'  [Calibrate] pixels_per_unit = {_ppu:.4f}')")
+            lines.append("")
+
+        elif op == "read_text":
+            lang = str(p.get("lang", "eng"))
+            lines.append("    # OCR 文字识别 (HALCON: read_ocr, 需安装 pytesseract)")
+            lines.append("    try:")
+            lines.append("        import pytesseract")
+            lines.append("        _gray_ocr = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image")
+            lines.append(f"        print(f'  [OCR] Text: {{pytesseract.image_to_string(_gray_ocr, lang=\"{lang}\")}}')")
+            lines.append("    except Exception as _e:")
+            lines.append("        print(f'  [OCR] skipped (pytesseract unavailable): {_e}')")
+            lines.append("")
+
         elif op == "edges_subpix":
             low_t = float(p.get("low_threshold", 30))
             high_t = float(p.get("high_threshold", 90))
@@ -153,6 +260,56 @@ def generate_python_code(steps: List[Dict[str, Any]], image_path_placeholder: st
             lines.append("            'circle_radius': round(radius, 2), 'orientation_rad': round(orientation, 4)")
             lines.append("        })")
             lines.append("    print(f'  [Measure] Measured {len(measurements)} target regions with OBB & circles')")
+            lines.append("")
+
+        elif op == "reduce_domain":
+            rtype = str(p.get("roi_type", "rect"))
+            fill = int(p.get("fill_value", 0))
+            lines.append("    # ROI 归约 (HALCON: reduce_domain) - 区域外置零, 画布尺寸不变")
+            if rtype == "circle":
+                cx = int(p.get("cx", 0)); cy = int(p.get("cy", 0)); rr = int(p.get("r", 100))
+                lines.append(f"    _roi_mask = np.zeros(gray.shape[:2], np.uint8); cv2.circle(_roi_mask, ({cx}, {cy}), {rr}, 255, -1)")
+            elif rtype == "polygon":
+                pts = p.get("points", [])
+                lines.append(f"    _roi_mask = np.zeros(gray.shape[:2], np.uint8); cv2.fillPoly(_roi_mask, [np.array({pts}, np.int32)], 255)")
+            else:
+                x = int(p.get("x", 0)); y = int(p.get("y", 0)); rw = int(p.get("w", 0)); rh = int(p.get("h", 0))
+                lines.append(f"    _roi_mask = np.zeros(gray.shape[:2], np.uint8); _roi_mask[{y}:{y}+{rh}, {x}:{x}+{rw}] = 255")
+            lines.append(f"    gray = np.where(_roi_mask > 0, gray, np.uint8({fill}))")
+            lines.append("    print(f'  [ReduceDomain] ROI pixels kept: {int(np.count_nonzero(_roi_mask))}')")
+            lines.append("")
+
+        elif op == "measure_pos":
+            x0 = p.get("x0", 0); y0 = p.get("y0", 0); x1 = p.get("x1", 100); y1 = p.get("y1", 100)
+            sigma = float(p.get("sigma", 1.0)); thr = float(p.get("threshold", 20.0))
+            lines.append("    # 一维卡尺测量 (HALCON: measure_pos) - 沿线亚像素边缘")
+            lines.append(f"    _n = max(2, int(np.hypot({x1} - {x0}, {y1} - {y0})))")
+            lines.append(f"    _ts = np.linspace(0, 1, _n)")
+            lines.append(f"    _xs = {x0} + _ts * ({x1} - {x0}); _ys = {y0} + _ts * ({y1} - {y0})")
+            lines.append("    _prof = np.array([_bilerp(gray, px, py) for px, py in zip(_xs, _ys)], np.float32)")
+            lines.append(f"    if {sigma} > 0:")
+            lines.append(f"        _k = max(1, int({sigma} * 3)); _prof = cv2.GaussianBlur(_prof.reshape(1, -1), (1, 2 * _k + 1), {sigma}).reshape(-1)")
+            lines.append("    _der = np.abs(np.gradient(_prof))")
+            lines.append(f"    _edges = [i for i in range(1, _n - 1) if _der[i] >= {thr} and _der[i] >= _der[i-1] and _der[i] >= _der[i+1]]")
+            lines.append("    print(f'  [MeasurePos] found {len(_edges)} edge point(s) along measure line')")
+            lines.append("")
+
+        elif op == "merge_images":
+            mode = str(p.get("mode", "blend")); alpha = float(p.get("alpha", 0.5))
+            lines.append(f"    # 多图合并 (分支汇聚): mode={mode}")
+            lines.append("    if current_mask is not None:")
+            lines.append(f"        image = cv2.addWeighted(image, {alpha}, image, {1 - alpha}, 0)")
+            lines.append("")
+
+        elif op == "onnx_inference":
+            model_path = str(p.get("model_path", ""))
+            lines.append("    # ONNX 深度学习推理 (需 onnxruntime, 缺失时跳过)")
+            lines.append("    try:")
+            lines.append("        import onnxruntime as _ort")
+            lines.append(f"        _sess = _ort.InferenceSession('{model_path}', providers=['CPUExecutionProvider'])")
+            lines.append("        print('  [ONNX] model loaded: " + model_path + "')")
+            lines.append("    except Exception as _e:")
+            lines.append("        print(f'  [ONNX] skipped (onnxruntime unavailable): {_e}')")
             lines.append("")
 
     lines.extend([

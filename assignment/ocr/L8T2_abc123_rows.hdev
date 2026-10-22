@@ -1,0 +1,39 @@
+*==== 第 3 步：两行各用各的字库（第一行字母 A-Z，第二行数字 0-9）====
+dev_close_window ()
+dev_open_window (0, 0, 512, 512, 'black', WindowHandle)
+read_image (Image, 'samples/L8_abc123.png')
+rgb1_to_gray (Image, GrayImage)
+*两行文字各给一个矩形区域
+gen_rectangle1 (LettersArea, 90, 130, 150, 270)
+gen_rectangle1 (DigitsArea, 160, 130, 215, 270)
+reduce_domain (GrayImage, LettersArea, LettersGray)
+reduce_domain (GrayImage, DigitsArea, DigitsGray)
+*阈值分割取黑色部分，闭运算，连通域，按面积去掉噪点
+threshold (LettersGray, LettersRegion, 0, 10)
+threshold (DigitsGray, DigitsRegion, 0, 10)
+closing_circle (LettersRegion, LettersClosing, 1)
+closing_circle (DigitsRegion, DigitsClosing, 1)
+connection (LettersClosing, LettersConn)
+connection (DigitsClosing, DigitsConn)
+select_shape (LettersConn, LettersSel, 'area', 'and', 100, 400)
+select_shape (DigitsConn, DigitsSel, 'area', 'and', 100, 400)
+sort_region (LettersSel, LettersSorted, 'character', 'true', 'row')
+sort_region (DigitsSel, DigitsSorted, 'character', 'true', 'row')
+*字母用 A-Z 字库，数字用 0-9 字库
+read_ocr_class_mlp ('Industrial_A-Z+_NoRej.omc', LetterHandle)
+read_ocr_class_mlp ('Industrial_0-9+_NoRej.omc', DigitHandle)
+do_ocr_multi_class_mlp (LettersSorted, GrayImage, LetterHandle, LetterClass, LetterConfidence)
+do_ocr_multi_class_mlp (DigitsSorted, GrayImage, DigitHandle, DigitClass, DigitConfidence)
+*显示
+dev_display (GrayImage)
+dev_set_color ('green')
+dev_display (LettersSorted)
+dev_display (DigitsSorted)
+smallest_rectangle1 (LettersSorted, LRow1, LColumn1, LRow2, LColumn2)
+smallest_rectangle1 (DigitsSorted, DRow1, DColumn1, DRow2, DColumn2)
+for Index := 0 to |LetterClass| - 1 by 1
+    disp_message (WindowHandle, LetterClass[Index], 'image', LRow1[Index] - 30, LColumn1[Index], 'red', 'true')
+endfor
+for Index := 0 to |DigitClass| - 1 by 1
+    disp_message (WindowHandle, DigitClass[Index], 'image', DRow2[Index], DColumn1[Index], 'red', 'true')
+endfor

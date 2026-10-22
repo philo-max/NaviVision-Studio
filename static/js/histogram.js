@@ -91,6 +91,11 @@ class InteractiveHistogram {
 
     if (!this.histogramData || this.histogramData.length === 0) return;
 
+    const tokens = getComputedStyle(document.documentElement);
+    const token = (name) => tokens.getPropertyValue(name).trim();
+    const colorAccent = token('--accent');
+    const colorDanger = token('--danger');
+
     const maxCount = Math.max(...this.histogramData, 1);
     const barWidth = w / 256;
 
@@ -98,7 +103,7 @@ class InteractiveHistogram {
     const minPx = (this.minVal / 255) * w;
     const maxPx = (this.maxVal / 255) * w;
 
-    this.ctx.fillStyle = 'rgba(0, 240, 255, 0.08)';
+    this.ctx.fillStyle = token('--accent-soft');
     this.ctx.fillRect(minPx, 0, maxPx - minPx, h);
 
     // 2. 绘制直方图柱体/折线
@@ -108,25 +113,25 @@ class InteractiveHistogram {
       const x = i * barWidth;
       const y = h - barH;
 
-      // 在区间内的柱子呈现高饱和霓虹色，区间外变暗
+      // 在区间内的柱子使用主色，区间外变淡
       if (i >= this.minVal && i <= this.maxVal) {
-        this.ctx.fillStyle = '#00f0ff';
+        this.ctx.fillStyle = colorAccent;
       } else {
-        this.ctx.fillStyle = '#222f46';
+        this.ctx.fillStyle = token('--border-bright');
       }
       this.ctx.fillRect(x, y, Math.max(1, barWidth), barH);
     }
 
-    // 3. 绘制 Min 游标 (青色)
-    this.ctx.strokeStyle = '#00f0ff';
+    // 3. 绘制 Min 游标 (主色)
+    this.ctx.strokeStyle = colorAccent;
     this.ctx.lineWidth = 2 * window.devicePixelRatio;
     this.ctx.beginPath();
     this.ctx.moveTo(minPx, 0);
     this.ctx.lineTo(minPx, h);
     this.ctx.stroke();
 
-    // 4. 绘制 Max 游标 (粉红)
-    this.ctx.strokeStyle = '#ff3366';
+    // 4. 绘制 Max 游标 (警示色)
+    this.ctx.strokeStyle = colorDanger;
     this.ctx.lineWidth = 2 * window.devicePixelRatio;
     this.ctx.beginPath();
     this.ctx.moveTo(maxPx, 0);
@@ -135,9 +140,9 @@ class InteractiveHistogram {
 
     // 绘制游标数值标签
     this.ctx.font = `${10 * window.devicePixelRatio}px monospace`;
-    this.ctx.fillStyle = '#00f0ff';
+    this.ctx.fillStyle = colorAccent;
     this.ctx.fillText(`Min: ${this.minVal}`, Math.min(minPx + 4, w - 80), 14 * window.devicePixelRatio);
-    this.ctx.fillStyle = '#ff3366';
+    this.ctx.fillStyle = colorDanger;
     this.ctx.fillText(`Max: ${this.maxVal}`, Math.max(maxPx - 60, 4), h - 6);
   }
 }

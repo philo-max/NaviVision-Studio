@@ -1,0 +1,62 @@
+dev_close_window ()
+read_image (Image, 'samples/L8_zhongwen1.png')
+
+get_image_size (Image, Width, Height)
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+rgb1_to_gray (Image, GrayImage)
+
+
+char_threshold(GrayImage, GrayImage, Characters, 2, 95, Threshold)
+dilation_rectangle1(Characters, RegionDilation, 4, 4)
+connection(RegionDilation, ConnectedRegions)	
+
+*分割单独区域后进行排序	
+sort_region(ConnectedRegions, SortedRegions, 'character', 'true', 'row')	
+count_obj(SortedRegions, Number)	
+
+*设置要训练的元组内容
+words:=['中','文','测','试']
+*准备好训练文件地址
+transfile:= 'chineseword.trf'
+*训练的过程:循环将提前准备好的字符内容--添加到训练文件中 
+for Index:= 1 to Number by 1
+    select_obj(SortedRegions, ObjectSelected, Index)
+    reduce_domain(GrayImage, ObjectSelected, ImageReduced)
+    append_ocr_trainf(ObjectSelected,ImageReduced, words[ Index - 1], transfile)
+endfor
+*准备好字库文件地址
+fontFile:='chineseword.omc'
+
+*读取训练文件名字
+read_ocr_trainf_names(transfile, CharacterNames, CharacterCount)
+*生成mlp分类器
+create_ocr_class_mlp(8, 10, 'constant', 'default',\ 
+CharacterNames, 80, 'none', 10, 42, OCRHandle)
+
+*训练
+trainf_ocr_class_mlp(OCRHandle, transfile, 200, 1, 0.01, Error, ErrorLog)
+*保存
+write_ocr_class_mlp(OCRHandle, fontFile)
+*清除句柄
+clear_ocr_class_mlp(OCRHandle)
+
+
+*读取图像测试
+read_image (Image1, 'samples/L8_zhongwen2.png')
+rgb1_to_gray(Image1, GrayImage1)
+binary_threshold(GrayImage1, Region, 'max_separability', 'dark', UsedThreshold) 
+dilation_rectangle1(Region, RegionDilation1, 4, 4) 
+connection(RegionDilation1, ConnectedRegions1)
+sort_region (ConnectedRegions1, SortedRegions1, 'character', 'true', 'column')
+*读取上面训练好的文件
+read_ocr_class_mlp('chineseword.omc', OCRHandle1)
+*执行识别
+do_ocr_multi_class_mlp(SortedRegions1, GrayImage1,OCRHandle1, Class, Confidence)
+
+*显示结果
+dev_display (Image1)
+disp_message(WindowHandle,'结果:','image',66,6, 'red','false')
+* disp_message (WindowHandle, CharacterNames, 'window', 12, 12, 'red', 'false')
+for i:= 1 to Number by 1
+disp_message(WindowHandle,Class[i-1], 'image', 66, 52 + 30*i, 'green', 'false')
+endfor

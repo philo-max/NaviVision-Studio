@@ -1,0 +1,39 @@
+dev_close_window()
+dev_open_window (0, 0, 512, 512, 'black', WindowHandle)
+read_image (Image, 'samples/L8_abc123.png')
+
+
+
+rgb1_to_gray (Image, GrayImage)
+*全局阈值分割。提取黑色的部分。黑色的为0，白色的是255
+threshold (Image, Region, 0, 10)
+
+*闭运算将断的区域联合
+closing_circle(Region, RegionClosing, 1)
+
+*连通域操作
+connection (Region, ConnectedRegions)
+
+
+
+select_shape (ConnectedRegions, SelectedRegions, 'area', 'and', 30, 200)
+* read_ocr_class_mlp ('Industrial_0-9+_Rej.omc', OCRHandle)
+read_ocr_class_mlp ('Industrial_A-Z+_Rej.omc', OCRHandle)
+do_ocr_multi_class_mlp (SelectedRegions, Image, OCRHandle, Class, Confidence)
+
+* A:=Class
+*在窗口上显示
+* disp_message (WindowHandle, A, 'window', 12, 12, 'black', 'true')
+
+totalNum:=|Class|
+*获取每个区域的包围盒，目的是得到显示坐标
+smallest_rectangle1(SelectedRegions, Row11, Column11, Row21, Column21)
+
+*循环显示并存取为字符串 
+strResult:=''
+for Index := 0 to totalNum -1 by 1
+disp_message(WindowHandle, Class[ Index],'image',\ 
+Row21[Index],Column21[Index], 'red', 'true') 
+strResult:= strResult+Class[Index] 
+
+endfor

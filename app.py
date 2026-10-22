@@ -10,6 +10,7 @@ import time
 import re
 import csv
 import json
+import threading
 from pathlib import Path
 import cv2
 import numpy as np
@@ -17,13 +18,14 @@ from fastapi import FastAPI, UploadFile, File, Form, Body, HTTPException, Reques
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from core.pipeline import Pipeline
 from core.session_manager import session_manager
 from core.code_generator import generate_python_code
 from core.script_runner import execute_custom_script
 from core.api_service import run_pipeline_inference
+from core.hdev_engine import HDevParser, HDevInterpreter, HDevTranspiler
 from core import operators as ops
 
 app = FastAPI(
@@ -168,19 +170,31 @@ class PipelineStep(BaseModel):
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     operator: Literal[
         "read_image", "rgb1_to_gray", "threshold", "auto_threshold", "connection",
-        "select_shape", "morphology", "filter", "edges_subpix", "measure_region"
+        "select_shape", "morphology", "filter", "edges_subpix", "measure_region",
+        "rgb_to_hsv", "hsv_threshold", "find_shape_model", "gen_contour_polygon",
+        "read_barcode", "calibrate", "read_text",
+        "reduce_domain", "measure_pos", "merge_images", "onnx_inference"
     ]
     enabled: bool = True
     params: Dict[str, Any] = Field(default_factory=dict)
+
+    # 允许结构化参数 (ROI 几何 / 多边形顶点 / ONNX 尺寸均值) 的算子
+    _STRUCTURED_PARAM_OPS = {"reduce_domain", "measure_pos", "merge_images", "onnx_inference"}
 
     @field_validator("params")
     @classmethod
     def validate_params(cls, value: Dict[str, Any]) -> Dict[str, Any]:
         if len(value) > 20:
             raise ValueError("单个算子最多支持 20 个参数")
-        if any(isinstance(item, (dict, list, tuple, set)) for item in value.values()):
-            raise ValueError("算子参数必须是基础 JSON 值")
         return value
+
+    @model_validator(mode="after")
+    def _check_param_shape(self):
+        if self.operator in self._STRUCTURED_PARAM_OPS:
+            return self
+        if any(isinstance(item, (dict, list, tuple, set)) for item in self.params.values()):
+            raise ValueError("算子参数必须是基础 JSON 值")
+        return self
 
 
 class PipelineUpdateRequest(BaseModel):
@@ -373,6 +387,173 @@ async def run_custom_script(request: Request, req: ScriptRunRequest):
         timeout_sec=3.0
     )
     return JSONResponse(content=res)
+
+
+# --- HDevelop DSL 交互与转译接口 ---
+HDEV_RUN_TIMEOUT_S = 30.0  # 脚本里可能包含 OCR 训练等较耗时的步骤
+
+
+class HDevRunRequest(BaseModel):
+    code: str
+    display_target: Optional[str] = None
+    roi: Optional[Dict[str, Any]] = None
+
+
+class HDevTranspileRequest(BaseModel):
+    code: str
+
+
+class HDevExportRequest(BaseModel):
+    format: Optional[str] = "plain"  # "plain" 或 "xml"
+
+
+@app.post("/api/hdev/run")
+async def run_hdev_script(request: Request, req: HDevRunRequest):
+    """在 HDevInterpreter 沙箱中执行 HDevelop 4GL 脚本并返回终端与多图层渲染数据"""
+    pipeline = get_pipeline(request)
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = HDevInterpreter(base_image=pipeline.source_image, session_id=sid)
+    interpreter.roi_geometry = req.roi
+    if req.display_target:
+        interpreter.display_target = req.display_target
+    res = interpreter.execute_script(req.code, timeout_sec=HDEV_RUN_TIMEOUT_S)
+    return JSONResponse(content=res)
+
+
+# --- HDevelop 单步调试 / 断点续跑 / 变量监视器 ---
+class _DebugSessionRegistry:
+    """按 Session ID 隔离的 HDevelop 单步调试会话池 (纯内存态, 空闲超时后自动回收)"""
+
+    def __init__(self, max_idle_seconds: float = 1800.0):
+        self._sessions: Dict[str, HDevInterpreter] = {}
+        self._last_active: Dict[str, float] = {}
+        self._lock = threading.Lock()
+        self.max_idle_seconds = max_idle_seconds
+
+    def start(self, sid: str, interpreter: HDevInterpreter) -> None:
+        with self._lock:
+            self._cleanup_expired()
+            self._sessions[sid] = interpreter
+            self._last_active[sid] = time.time()
+
+    def get(self, sid: str) -> Optional[HDevInterpreter]:
+        with self._lock:
+            self._cleanup_expired()
+            if sid in self._sessions:
+                self._last_active[sid] = time.time()
+            return self._sessions.get(sid)
+
+    def stop(self, sid: str) -> bool:
+        with self._lock:
+            existed = sid in self._sessions
+            self._sessions.pop(sid, None)
+            self._last_active.pop(sid, None)
+            return existed
+
+    def _cleanup_expired(self) -> None:
+        now = time.time()
+        expired = [sid for sid, t in self._last_active.items() if now - t > self.max_idle_seconds]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+            self._last_active.pop(sid, None)
+
+
+_debug_sessions = _DebugSessionRegistry()
+
+
+class HDevDebugStartRequest(BaseModel):
+    code: str
+    roi: Optional[Dict[str, Any]] = None
+
+
+class HDevDebugContinueRequest(BaseModel):
+    breakpoints: Optional[List[int]] = None
+
+
+@app.post("/api/hdev/debug/start")
+async def hdev_debug_start(request: Request, req: HDevDebugStartRequest):
+    """启动一个 HDevelop 单步调试会话: 解析脚本并暂停在第一条指令之前"""
+    pipeline = get_pipeline(request)
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = HDevInterpreter(base_image=pipeline.source_image, session_id=sid)
+    interpreter.roi_geometry = req.roi
+    res = interpreter.load_script(req.code)
+    _debug_sessions.start(sid, interpreter)
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/debug/step")
+async def hdev_debug_step(request: Request):
+    """单步调试: 执行当前待执行的一条指令后暂停, 返回执行后的变量与画面快照"""
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = _debug_sessions.get(sid)
+    if interpreter is None:
+        raise HTTPException(status_code=404, detail="调试会话不存在或已过期, 请先调用 /api/hdev/debug/start")
+    res = interpreter.step_once()
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/debug/continue")
+async def hdev_debug_continue(request: Request, req: HDevDebugContinueRequest = Body(default=HDevDebugContinueRequest())):
+    """断点续跑: 从当前指令持续执行直到命中断点行号或脚本结束"""
+    sid = request.headers.get("X-Session-ID") or "default"
+    interpreter = _debug_sessions.get(sid)
+    if interpreter is None:
+        raise HTTPException(status_code=404, detail="调试会话不存在或已过期, 请先调用 /api/hdev/debug/start")
+    res = interpreter.continue_run(breakpoints=req.breakpoints)
+    return JSONResponse(content=res)
+
+
+@app.post("/api/hdev/debug/stop")
+async def hdev_debug_stop(request: Request):
+    """终止并清理当前 HDevelop 调试会话"""
+    sid = request.headers.get("X-Session-ID") or "default"
+    _debug_sessions.stop(sid)
+    return JSONResponse(content={"success": True})
+
+
+@app.post("/api/hdev/to_pipeline")
+async def hdev_to_pipeline_endpoint(request: Request, req: HDevTranspileRequest):
+    """将 HDevelop 脚本转译为 NaviVision 可视化流水线步骤并立即执行"""
+    pipeline = get_pipeline(request)
+    steps = HDevTranspiler.hdev_to_pipeline(req.code)
+    results = pipeline.set_steps(steps)
+    return JSONResponse(content={
+        "success": True,
+        "steps": steps,
+        "results": results
+    })
+
+
+@app.post("/api/hdev/from_pipeline")
+async def hdev_from_pipeline_endpoint(request: Request, req: HDevExportRequest = Body(default=HDevExportRequest())):
+    """将当前会话的可视化流水线步骤导出为标准 HDevelop 脚本代码"""
+    pipeline = get_pipeline(request)
+    is_xml = (req.format or "").lower() == "xml"
+    hdev_code = HDevTranspiler.pipeline_to_hdev(pipeline.steps, format_as_xml=is_xml)
+    return JSONResponse(content={
+        "success": True,
+        "format": "xml" if is_xml else "plain",
+        "code": hdev_code
+    })
+
+
+@app.post("/api/hdev/upload")
+async def upload_hdev_file(request: Request, file: UploadFile = File(...)):
+    """上传 .hdev / .hdvp 文件并提取脚本代码"""
+    contents = await file.read()
+    try:
+        text_content = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        text_content = contents.decode("gbk", errors="ignore")
+
+    instructions = HDevParser.parse_script(text_content)
+    return JSONResponse(content={
+        "success": True,
+        "filename": file.filename,
+        "code": text_content,
+        "instruction_count": len(instructions)
+    })
 
 
 # --- 外部工业推理 REST API ---

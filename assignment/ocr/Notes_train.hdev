@@ -1,0 +1,36 @@
+*==================== 笔记 09：OCR 离线训练 ====================
+dev_close_window ()
+path := 'samples/ocr_digits'
+*1）读取样本图像，分割单个字符区域
+read_image (Image, path+'/Traning.bmp')
+get_image_size (Image, Width, Height)
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+dev_display (Image)
+threshold (Image, Region1, 0, 10)
+connection (Region1, ConnectedRegions)
+select_shape (ConnectedRegions, SelectedRegions, 'area', 'and', 1000, 99999)
+sort_region (SelectedRegions, SortedRegions, 'first_point', 'true', 'column')
+count_obj (SortedRegions, Number)
+if (Number#10)
+    disp_message (WindowHandle, '分割错误', 'window', 0, 0, 'red', 'false')
+    stop ()
+endif
+select_obj (SortedRegions, ObjectSelected1, 1)
+
+*2）将分割出的区域添加到训练文件中
+smallest_rectangle1 (ObjectSelected1, Row11, Column11, Row21, Column21)
+charWidth:=Row21-Row11
+charHeight:=Column21-Column11
+charList:=[ '0','1','2','3','4','5','6','7','8','9']
+for Number := 1 to Number by 1
+    select_obj (SortedRegions, ObjectSelected, Number)
+    append_ocr_trainf (ObjectSelected, Image, charList[Number-1], path+'/Model0-9.trf')
+endfor
+
+*3）获取字符列表，创建、训练、保存OCR分类器
+read_ocr_trainf_names (path+'/Model0-9.trf', CharacterNames, CharacterCount)
+create_ocr_class_mlp (charWidth, charHeight, 'constant', 'default', CharacterNames, 80, 'none', 10, 42, OCRHandle)
+trainf_ocr_class_mlp (OCRHandle, path+'/Model0-9.trf', 200, 1, 0.01, Error, ErrorLog)
+write_ocr_class_mlp (OCRHandle, path+'/Model0-9.omc')
+dev_display (Image)
+disp_message (WindowHandle, '训练完成', 'window', 0, 0, 'green', 'false')
